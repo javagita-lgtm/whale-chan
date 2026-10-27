@@ -1,0 +1,36 @@
+{
+  "name": "whale-chan",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Whale-chan — 混迹于 QQ / 微信群的 AI 聊天机器人（自研核心）",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "verify": "pnpm build && tsx scripts/verify.ts",
+    "verify:real": "pnpm build && tsx scripts/verify-real.ts",
+    "fake-onebot": "tsx test/fake-onebot/server.ts",
+    "config": "tsx src/web/index.ts",
+    "stickers:fetch": "tsx scripts/fetch-stickers.ts",
+    "stickers:search": "tsx scripts/search-stickers.ts",
+    "pack:migrate": "pnpm build && tsx scripts/pack-migrate.ts"
+  },
+  "dependencies": {
+    "sharp": "^0.35.5",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.7"
+  }
+}

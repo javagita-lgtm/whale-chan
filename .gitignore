@@ -1,0 +1,71 @@
+# ---------- 依赖与构建 ----------
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# ---------- 环境与密钥 ----------
+# .env 含 LLM_API_KEY / QQ 密码，绝不能提交
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# ---------- 运行时数据 ----------
+# 数据库（含真实聊天记录）、表情包（1235 张）、歌曲、临时产物
+data/
+logs/
+*.log
+*.err
+
+# ---------- 大文件：模型与权重 ----------
+# GPT-SoVITS 完整模型目录（13 GB+），含声优参考音频，不随代码分发
+voicemodel/
+*.safetensors
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.bin
+*.gguf
+
+# 音频/视频产物（测试样本如需要请单独放 test/fixtures 并取消下方注释）
+*.wav
+*.mp3
+*.flac
+*.m4a
+*.mp4
+*.webm
+# !test/fixtures/*.wav
+
+# ---------- 生成产物 ----------
+generated/
+# 注意：不全局排除图片，否则会误伤文档配图和 assets。
+# 生图输出本来就在 E:\comfyUI\output，不在项目里。
+
+# ---------- 编辑器与系统 ----------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 一次性脚本与临时文件 ----------
+scripts/_*
+_*.mjs
+_*.ts
+_*.json
+_*.txt
+_*.log
+*.tmp
+*.bak
+*.orig
+
+# ---------- 本地运行时 ----------
+.whale-chan/
+runtime/
+*.exe
+
+# ---------- pnpm ----------
+.pnpm-store/

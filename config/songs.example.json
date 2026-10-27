@@ -1,0 +1,22 @@
+[
+  {
+    "voice": "soyo",
+    "file": "data/songs/春日影.mp3",
+    "durationSec": 148,
+    "id": "春日影",
+    "aliases": [
+      "haruhikage",
+      "春雾影",
+      "春日影 (MyGO!!!!! ver.)",
+      "春日影 MyGO"
+    ],
+    "title": "春日影"
+  },
+  {
+    "id": "届かない恋",
+    "title": "届かない恋",
+    "file": "data/songs/covers/届かない恋-soyo.mp3",
+    "voice": "soyo",
+    "durationSec": 0
+  }
+]

@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whale-chan 配置</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #171d24;
+    --panel2: #1e262f;
+    --border: #2a3441;
+    --text: #dbe4ee;
+    --muted: #7d8b9c;
+    --accent: #4a9eff;
+    --ok: #3ddc84;
+    --err: #ff5f56;
+    --warn: #ffbd2e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 14px/1.6 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(15,20,25,.95);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  header .spacer { flex: 1; }
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    padding: 6px 14px; border-radius: 7px; cursor: pointer;
+    color: var(--muted); user-select: none; border: 1px solid transparent;
+  }
+  .tab:hover { background: var(--panel2); }
+  .tab.active {
+    background: var(--panel2); color: var(--text); border-color: var(--border);
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  section.panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; margin-bottom: 18px;
+  }
+  section.panel > h2 {
+    margin: 0 0 4px; font-size: 15px; font-weight: 600;
+  }
+  section.panel > .desc {
+    color: var(--muted); font-size: 13px; margin: 0 0 16px;
+  }
+  .field {
+    display: grid; grid-template-columns: 230px 1fr; gap: 14px;
+    padding: 12px 0; border-top: 1px solid var(--border);
+    align-items: start;
+  }
+  .field:first-of-type { border-top: none; }
+  .field label { font-weight: 500; padding-top: 6px; }
+  .field .key {
+    display: block; font-family: ui-monospace, Consolas, monospace;
+    font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px;
+  }
+  .field .help { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; padding: 8px 10px;
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 7px; color: var(--text); font: inherit;
+    outline: none; transition: border-color .15s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  input.invalid { border-color: var(--err); }
+  .row-inline { display: flex; gap: 10px; align-items: center; }
+  .switch { position: relative; width: 44px; height: 24px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: var(--border);
+    border-radius: 24px; cursor: pointer; transition: .2s;
+  }
+  .slider::before {
+    content: ""; position: absolute; height: 18px; width: 18px;
+    left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s;
+  }
+  .switch input:checked + .slider { background: var(--ok); }
+  .switch input:checked + .slider::before { transform: translateX(20px); }
+  button {
+    padding: 9px 18px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--panel2); color: var(--text); font: inherit;
+    cursor: pointer; transition: .15s;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04121f; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .actions { display: flex; gap: 10px; align-items: center; position: sticky; bottom: 0; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--panel2); border: 1px solid var(--border);
+    padding: 11px 20px; border-radius: 9px; font-size: 13px;
+    opacity: 0; transition: .25s; pointer-events: none; z-index: 100;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.ok { border-color: var(--ok); }
+  .toast.err { border-color: var(--err); }
+  .tag {
+    display: inline-block; font-size: 11px; padding: 1px 7px;
+    border-radius: 5px; background: var(--panel2);
+    border: 1px solid var(--border); color: var(--muted); margin-left: 6px;
+  }
+  .hint {
+    background: rgba(74,158,255,.08); border: 1px solid rgba(74,158,255,.25);
+    padding: 10px 14px; border-radius: 9px; font-size: 13px;
+    color: #9cc7ff; margin-bottom: 18px;
+  }
+  /* ---------- 控制台 ---------- */
+  .dash-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px; margin-bottom: 18px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px;
+  }
+  .voice-list { display: flex; flex-direction: column; gap: 8px; }
+  .voice-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--panel); cursor: pointer; transition: border-color .15s;
+  }
+  .voice-item:hover { border-color: var(--accent); }
+  .voice-item.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+  .voice-item .vname { font-weight: 600; }
+  .voice-item .vmeta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .voice-item .vbadge {
+    font-size: 11px; padding: 3px 8px; border-radius: 999px;
+    background: var(--accent); color: #fff;
+  }
+  .card .card-title {
+    font-size: 12px; color: var(--muted); margin-bottom: 10px;
+    letter-spacing: .04em;
+  }
+  .card .big { font-size: 22px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .dot {
+    width: 9px; height: 9px; border-radius: 50%; flex: none;
+    background: var(--muted); box-shadow: 0 0 0 3px rgba(125,139,156,.15);
+  }
+  .dot.on  { background: var(--ok);   box-shadow: 0 0 0 3px rgba(61,220,132,.18); }
+  .dot.off { background: var(--err);  box-shadow: 0 0 0 3px rgba(255,95,86,.18); }
+  .dot.wait{ background: var(--warn); box-shadow: 0 0 0 3px rgba(255,189,46,.18); }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+  button.danger { border-color: rgba(255,95,86,.5); color: #ff8b84; }
+  button.danger:hover { border-color: var(--err); background: rgba(255,95,86,.1); }
+  button.ok { border-color: rgba(61,220,132,.5); color: #7cf0ab; }
+  button.ok:hover { border-color: var(--ok); background: rgba(61,220,132,.1); }
+  .log-box {
+    background: #0b0f13; border: 1px solid var(--border); border-radius: 9px;
+    padding: 12px; font-family: ui-monospace, Consolas, monospace;
+    font-size: 12px; line-height: 1.65; height: 340px; overflow: auto;
+    white-space: pre-wrap; word-break: break-all; color: #a8b6c6;
+  }
+  .log-box .warn { color: var(--warn); }
+  .log-box .err  { color: #ff8b84; }
+  .log-box .ok   { color: #7cf0ab; }
+  .msg-list { display: flex; flex-direction: column; gap: 8px; }
+  .msg-item {
+    background: var(--panel2); border-radius: 8px; padding: 9px 12px;
+    font-size: 13px; border-left: 2px solid var(--border);
+  }
+  .msg-item.self { border-left-color: var(--accent); }
+  .msg-item .meta { font-size: 11px; color: var(--muted); margin-bottom: 3px; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; padding: 6px 14px; font-size: 13px; }
+  .seg button.on { background: var(--panel2); color: var(--text); }
+  .persona-card {
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 14px;
+  }
+  .persona-card .head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+  .persona-card .head input { max-width: 200px; }
+  .persona-card textarea { min-height: 240px; resize: vertical; font-size: 13px; line-height: 1.7; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .small { font-size: 12px; color: var(--muted); }
+  .hidden { display: none !important; }
+  .errbox {
+    color: var(--err); font-size: 12px; margin-top: 4px;
+  }
+  @media (max-width: 720px) {
+    .field { grid-template-columns: 1fr; }
+    .grid2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🐋 Whale-chan</h1>
+  <div class="tabs">
+    <div class="tab active" data-tab="dash">控制台</div>
+    <div class="tab" data-tab="config">参数配置</div>
+    <div class="tab" data-tab="persona">人设</div>
+    <div class="tab" data-tab="draw">画图</div>
+  </div>
+  <div class="spacer"></div>
+  <button id="saveBtn" class="primary">保存</button>
+</header>
+
+<main>
+  <div class="hint" id="restartHint">
+    修改后需<b>重启机器人</b>才会生效。可在「控制台」一键重启。
+  </div>
+
+  <div id="tab-dash">
+    <div class="dash-grid">
+      <div class="card">
+        <div class="card-title">机器人</div>
+        <div class="big"><span class="dot" id="dotBot"></span><span id="txtBot">检查中…</span></div>
+        <div class="sub" id="subBot">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">QQ 连接</div>
+        <div class="big"><span class="dot" id="dotConn"></span><span id="txtConn">检查中…</span></div>
+        <div class="sub" id="subConn">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">守护进程</div>
+        <div class="big"><span class="dot" id="dotWd"></span><span id="txtWd">检查中…</span></div>
+        <div class="sub" id="subWd">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">记忆库</div>
+        <div class="big" id="txtMsg">—</div>
+        <div class="sub" id="subMsg">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">生图服务</div>
+        <div class="big"><span class="dot" id="dotImg"></span><span id="txtImg">检查中…</span></div>
+        <div class="sub" id="subImg">—</div>
+      </div>
+      <div class="card">
+        <div class="card-title">语音服务</div>
+        <div class="big"><span class="dot" id="dotTts"></span><span id="txtTts">检查中…</span></div>
+        <div class="sub" id="subTts">—</div>
+      </div>
+    </div>
+
+    <section class="panel">
+      <h2>语音音色</h2>
+      <p class="desc">选一个萌系音色，机器人的「说一句」会用这个声音。切换后首次合成要多等十几秒（加载模型）。</p>
+      <div id="voiceList" class="voice-list">加载中…</div>
+    </section>
+
+    <section class="panel">
+      <h2>操作</h2>
+      <p class="desc">直接控制进程。重启会应用新配置。</p>
+      <div class="btn-row">
+        <button class="ok" data-action="bot-start">启动机器人</button>
+        <button class="danger" data-action="bot-stop">停止机器人</button>
+        <button data-action="bot-restart">重启机器人</button>
+        <button data-action="napcat-start">启动 NapCat</button>
+      </div>
+      <p class="small" style="margin-top:12px">
+        停止后群里不再回复。NapCat 掉线需要扫码，控制台无法代劳。
+      </p>
+    </section>
+
+    <section class="panel">
+      <h2>最近对话</h2>
+      <p class="desc">来自记忆库，最新的在最上面。</p>
+      <div class="msg-list" id="msgList"><span class="small">加载中…</span></div>
+    </section>
+
+    <section class="panel">
+      <h2>日志</h2>
+      <p class="desc">
+        <span class="seg">
+          <button class="on" data-log="bot">机器人</button>
+          <button data-log="watchdog">守护</button>
+          <button data-log="error">错误</button>
+        </span>
+        <span class="small" style="margin-left:10px">每 3 秒自动刷新</span>
+      </p>
+      <div class="log-box" id="logBox">加载中…</div>
+    </section>
+  </div>
+
+  <div id="tab-config" class="hidden"></div>
+
+  <div id="tab-draw" class="hidden">
+    <section class="panel">
+      <h2>本地生图</h2>
+      <p class="desc">
+        用本机 ComfyUI 出图，不联网、不花钱。直接写中文，会自动翻成英文 tag。
+        512×512 约 10 秒，832×832（SDXL）约 25 秒。
+      </p>
+
+      <p class="desc" style="margin-bottom:14px">
+        <b>两种输入方式，填原始提示词时自动模式失效。</b>
+      </p>
+
+      <div style="padding:12px;border:1px solid #2a2d33;border-radius:8px;margin-bottom:14px">
+        <div style="font-weight:600;margin-bottom:10px">自动模式（中文需求）</div>
+
+        <div class="field">
+          <label>正向 · 画什么</label>
+          <textarea id="drawPrompt" rows="3" placeholder="例如：一只蓝色的鲸鱼，可爱风格"></textarea>
+          <p class="small" style="margin-top:6px">
+            中文会走 LLM 翻译成英文 tag，并自动补画风、构图、光影词。
+          </p>
+        </div>
+
+        <div class="field">
+          <label>负向 · 不要什么（可选）</label>
+          <textarea id="drawNegative" rows="2" placeholder="例如：blurry, extra limbs, bad hands"></textarea>
+          <p class="small" style="margin-top:6px">
+            填的内容会<b>追加</b>到默认负向词后面，不是替换。
+          </p>
+        </div>
+      </div>
+
+      <div style="padding:12px;border:1px solid #2a2d33;border-radius:8px;margin-bottom:14px">
+        <div style="font-weight:600;margin-bottom:10px">原始模式（英文 tag 直通）</div>
+
+        <div class="field">
+          <label>正向 · 完整提示词</label>
+          <textarea id="drawRawPrompt" rows="3" placeholder="masterpiece, best quality, 1girl, solo, saber (fate), armor, upper body, simple background"></textarea>
+          <p class="small" style="margin-top:6px">
+            <b>填了这栏，上面的自动模式会被忽略。</b>
+            不做翻译、不加画风词、不过滤——但也不会帮你补质量词和构图词，
+            写不全就容易出图糊。
+          </p>
+        </div>
+
+        <div class="field">
+          <label>负向 · 完整提示词（可选）</label>
+          <textarea id="drawRawNegative" rows="2" placeholder="留空则用默认：worst quality, low quality, bad anatomy, watermark, text"></textarea>
+          <p class="small" style="margin-top:6px">
+            填了则<b>完全替换</b>默认负向词。
+          </p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>模型</label>
+        <select id="drawModel">
+          <option value="auto">自动（按尺寸和关键词选）</option>
+          <option value="sd15">SD1.5 · dreamshaper_8（快，10 秒）</option>
+          <option value="sdxl">SDXL · NoobAI-XL（好，25 秒）</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label>尺寸</label>
+        <select id="drawSize">
+          <option value="512">512 × 512（快，约 10 秒）</option>
+          <option value="768">768 × 768</option>
+          <option value="832">832 × 832（SDXL 原生）</option>
+          <option value="1024" selected>1024 × 1024（画质最佳，约 25 秒）</option>
+          <option value="1216">1216 × 1216（8GB 显存上限，约 33 秒）</option>
+        </select>
+        <p class="small" style="margin-top:6px">
+          实测：832 / 1024 / 1152 / 1216 都正常；<b>1280 会爆显存降级到 274 秒</b>，1536 直接失败。
+          超过 1024 后画面会变"扁平"（模型是硬拉，不是加细节），所以想要大图请用下面的放大。
+        </p>
+      </div>
+
+      <div class="field">
+        <label>放大（可选）</label>
+        <select id="drawUpscale">
+          <option value="">不放大</option>
+          <option value="4x-UltraSharp.pth">4x-UltraSharp（通用，细节好）</option>
+          <option value="RealESRGAN_x4plus_anime_6B.pth">RealESRGAN anime6B（线条锐利）</option>
+        </select>
+        <p class="small" style="margin-top:6px">
+          先按上面的尺寸出图，再用放大模型放大 4 倍。实测<b>只多 1 秒</b>，显存几乎不变。<br>
+          例：1024 出图 → 放大到 4096（16 MB）。这是真正增加细节，比直接画大图好得多。
+        </p>
+      </div>
+
+      <div class="field">
+        <label>放大后缩到</label>
+        <select id="drawUpscaleTo">
+          <option value="">保持 4x 原始尺寸</option>
+          <option value="2048" selected>2048 × 2048（推荐，文件约 3 MB）</option>
+          <option value="1536">1536 × 1536</option>
+          <option value="2560">2560 × 2560</option>
+          <option value="4096">4096 × 4096（16 MB）</option>
+        </select>
+        <p class="small" style="margin-top:6px">仅在选择放大模型时生效。</p>
+      </div>
+
+      <div class="field">
+        <label>画风</label>
+        <select id="drawStyle">
+          <option value="anime" selected>二次元（默认）</option>
+          <option value="realistic">写实</option>
+          <option value="auto">不加约束</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="drawAdult" style="width:auto;margin:0">
+          <span>允许成人内容（仅本机面板）</span>
+        </label>
+        <p class="small" style="margin-top:6px;line-height:1.6">
+          勾选后不再拦截露骨描述，只影响这个面板——群里和 DSH 保持原有限制。<br>
+          <b>注意</b>：中文需求仍需经过 LLM 翻译，模型自身的安全策略拦不住。
+          涉及未成年设定角色的色情内容会被拒绝，且属于违法行为。<br>
+          <b>绕过办法</b>：直接把英文 tag 写进输入框（如 <code>1girl, tohsaka rin, white thighhighs</code>），
+          英文不经过 LLM，只受本机策略约束。
+        </p>
+      </div>
+
+      <div class="actions">
+        <button id="drawBtn" class="primary">生成</button>
+        <button id="freeVramBtn">释放显存</button>
+        <span id="drawStatus" class="small"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>结果</h2>
+      <p class="desc">点图片可在新窗口打开原图。</p>
+      <div id="drawResult" class="small">还没有生成过。</div>
+    </section>
+
+    <section class="panel">
+      <h2>历史图片</h2>
+      <p class="desc">
+        列出输出目录里所有生成过的图（按时间倒序）。点缩略图看大图，点「原图」在新窗口打开。
+      </p>
+      <div class="actions" style="margin-bottom:12px">
+        <button id="galleryRefresh">刷新</button>
+        <select id="gallerySize" style="width:auto">
+          <option value="30">每页 30 张</option>
+          <option value="60" selected>每页 60 张</option>
+          <option value="120">每页 120 张</option>
+        </select>
+        <span id="galleryInfo" class="small"></span>
+      </div>
+      <div id="galleryGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px"></div>
+      <div class="actions" style="margin-top:12px">
+        <button id="galleryPrev">上一页</button>
+        <span id="galleryPage" class="small">—</span>
+        <button id="galleryNext">下一页</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="tab-persona" class="hidden">
+    <section class="panel">
+      <h2>人设</h2>
+      <p class="desc">保存后 2 秒内自动生效，无需重启。systemPrompt 是核心：写清性格、说话方式、口头禅。</p>
+      <div id="personaList"></div>
+      <div class="actions" style="margin-top:12px">
+        <button id="addPersona">+ 添加人设</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>按群绑定人设</h2>
+      <p class="desc">让某个群使用指定人设。格式：群号 → 人设 ID。用逗号分隔多组。</p>
+      <textarea id="bindings" rows="4" placeholder="100000001: whale&#10;987654321: grumpy"></textarea>
+      <p class="small">留空表示所有群都用「默认人设」。</p>
+      <div class="field" style="border:none;padding-top:8px">
+        <label>默认人设 ID</label>
+        <input type="text" id="defaultPersonaId" placeholder="whale">
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let schema = [];
+let values = {};
+let personaData = { defaultPersonaId: 'whale', personas: [], groupBindings: {} };
+let currentTab = 'config';
+
+const $ = (s) => document.querySelector(s);
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+function toast(msg, kind = 'ok') {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + kind;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.className = 'toast'; }, 2600);
+}
+
+async function loadConfig() {
+  const r = await fetch('/api/config');
+  const data = await r.json();
+  schema = data.schema;
+  values = data.values;
+  renderConfig();
+}
+
+function renderConfig() {
+  const root = $('#tab-config');
+  root.innerHTML = '';
+
+  for (const section of schema) {
+    const panel = el('section', 'panel');
+    panel.appendChild(el('h2', '', section.title));
+    panel.appendChild(el('p', 'desc', section.description));
+
+    for (const f of section.fields) {
+      const row = el('div', 'field');
+      const labelWrap = el('div');
+      labelWrap.appendChild(el('label', '', f.label));
+      const keySpan = el('span', 'key', f.key);
+      labelWrap.appendChild(keySpan);
+      if (f.requiresRestart) {
+        const tag = el('span', 'tag', '需重启');
+        labelWrap.appendChild(tag);
+      }
+      row.appendChild(labelWrap);
+
+      const inputWrap = el('div');
+      inputWrap.appendChild(buildInput(f));
+      const help = el('div', 'help', describe(f));
+      inputWrap.appendChild(help);
+      row.appendChild(inputWrap);
+
+      panel.appendChild(row);
+    }
+    root.appendChild(panel);
+  }
+}
+
+function describe(f) {
+  const parts = [f.help];
+  if (f.type === 'number' && (f.min !== undefined || f.max !== undefined)) {
+    parts.push(`范围 ${f.min ?? '−∞'} ~ ${f.max ?? '∞'}`);
+  }
+  if (f.options) parts.push(`可选：${f.options.join(' / ')}`);
+  if (f.default !== undefined && f.default !== '') parts.push(`默认 ${f.default}`);
+  return parts.join(' · ');
+}
+
+function buildInput(f) {
+  const cur = values[f.key] ?? f.default ?? '';
+
+  if (f.type === 'boolean') {
+    const wrap = el('div', 'row-inline');
+    const sw = el('label', 'switch');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = String(cur).toLowerCase() === 'true' || cur === '1';
+    cb.dataset.key = f.key;
+    cb.onchange = () => { values[f.key] = cb.checked ? 'true' : 'false'; };
+    const sl = el('span', 'slider');
+    sw.appendChild(cb); sw.appendChild(sl);
+    wrap.appendChild(sw);
+    wrap.appendChild(el('span', 'small', cur === 'true' || cur === '1' ? '已启用' : '已关闭'));
+    cb.addEventListener('change', () => {
+      wrap.lastChild.textContent = cb.checked ? '已启用' : '已关闭';
+    });
+    return wrap;
+  }
+
+  if (f.options) {
+    const sel = el('select');
+    sel.dataset.key = f.key;
+    for (const opt of f.options) {
+      const o = el('option', '', opt);
+      o.value = opt;
+      if (opt === cur) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => { values[f.key] = sel.value; };
+    return sel;
+  }
+
+  if (f.type === 'secret') {
+    const wrap = el('div', 'row-inline');
+    const inp = el('input');
+    inp.type = 'password';
+    inp.dataset.key = f.key;
+    inp.placeholder = cur === '__SET__' ? '已设置（留空表示不修改）' : '未设置';
+    inp.value = '';
+    inp.oninput = () => {
+      // 只有真正输入了才覆盖；留空保持原值
+      if (inp.value.length > 0) values[f.key] = inp.value;
+      else if (cur === '__SET__') values[f.key] = '__SET__';
+      else values[f.key] = '';
+    };
+    wrap.appendChild(inp);
+    return wrap;
+  }
+
+  const inp = el('input');
+  inp.type = f.type === 'number' ? 'number' : 'text';
+  inp.dataset.key = f.key;
+  inp.value = cur;
+  if (f.type === 'number') {
+    if (f.min !== undefined) inp.min = f.min;
+    if (f.max !== undefined) inp.max = f.max;
+  }
+  inp.oninput = () => { values[f.key] = inp.value; };
+  return inp;
+}
+
+/* ---------------- 控制台 ---------------- */
+
+let dashTimer = null;
+let logSource = 'bot';
+
+function setDot(id, state) {
+  const d = $(id);
+  d.className = 'dot ' + state;
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0; let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + ' ' + u[i];
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  return iso.replace('T', ' ').slice(0, 19);
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+
+    // 机器人
+    if (s.bot.running) {
+      setDot('#dotBot', 'on');
+      $('#txtBot').textContent = '运行中';
+      $('#subBot').textContent = 'pid ' + s.bot.pid + (s.bot.lastSignal ? ' · ' + s.bot.lastSignal : '');
+    } else {
+      setDot('#dotBot', 'off');
+      $('#txtBot').textContent = '已停止';
+      $('#subBot').textContent = '点下方「启动机器人」';
+    }
+
+    // QQ 连接
+    if (s.bot.connected) {
+      setDot('#dotConn', 'on');
+      $('#txtConn').textContent = '已连接';
+      $('#subConn').textContent = 'OneBot 3001 正常';
+    } else if (s.napcat.port3001) {
+      setDot('#dotConn', 'wait');
+      $('#txtConn').textContent = '端口在但未握手';
+      $('#subConn').textContent = '机器人可能未启动';
+    } else {
+      setDot('#dotConn', 'off');
+      $('#txtConn').textContent = '未连接';
+      $('#subConn').textContent = s.napcat.launcher ? 'NapCat 在跑，等待扫码' : 'NapCat 未启动';
+    }
+
+    // 守护进程
+    if (s.watchdog.running) {
+      setDot('#dotWd', 'on');
+      $('#txtWd').textContent = '运行中';
+      $('#subWd').textContent = '挂了会自动拉起';
+    } else {
+      setDot('#dotWd', 'off');
+      $('#txtWd').textContent = '未运行';
+      $('#subWd').textContent = '开机自启任务可能未启用';
+    }
+
+    // 记忆库
+    if (s.stats) {
+      $('#txtMsg').textContent = s.stats.messages + ' 条';
+      $('#subMsg').textContent = `表情包 ${s.stats.stickers} · 库 ${fmtBytes(s.stats.dbSizeBytes)}`;
+      renderMessages(s.stats.recent || []);
+    } else {
+      $('#txtMsg').textContent = '—';
+      $('#subMsg').textContent = '数据库未找到';
+    }
+
+    // 生图服务（ComfyUI）
+    const img = s.imageGen || { online: false };
+    if (img.online) {
+      setDot('#dotImg', 'on');
+      $('#txtImg').textContent = '就绪';
+      if (img.vramFreeMB != null && img.vramTotalMB != null) {
+        const used = img.vramTotalMB - img.vramFreeMB;
+        $('#subImg').textContent = `显存 ${used}/${img.vramTotalMB} MB 占用`;
+      } else {
+        $('#subImg').textContent = '说「画个xxx」即可出图';
+      }
+    } else {
+      setDot('#dotImg', 'off');
+      $('#txtImg').textContent = '未启动';
+      $('#subImg').textContent = 'ComfyUI 未响应（8188）';
+    }
+
+    // 语音服务（TTS）
+    const tts = s.tts || { online: false };
+    if (tts.online) {
+      setDot('#dotTts', 'on');
+      $('#txtTts').textContent = '就绪';
+      $('#subTts').textContent = `${tts.voices || 0} 个音色 · 当前 ${tts.voice || '—'}`;
+    } else {
+      setDot('#dotTts', 'off');
+      $('#txtTts').textContent = '未就绪';
+      // 显示具体原因（适配层挂了 / 后端挂了），别只说"未响应"
+      $('#subTts').textContent = tts.reason || 'TTS 未响应（5051 / 9880）';
+    }
+  } catch (e) {
+    setDot('#dotBot', 'off');
+    setDot('#dotConn', 'off');
+    setDot('#dotWd', 'off');
+    $('#txtBot').textContent = '面板失联';
+    $('#subBot').textContent = e.message;
+  }
+}
+
+function renderMessages(list) {
+  const box = $('#msgList');
+  if (!list.length) { box.innerHTML = '<span class="small">还没有对话记录</span>'; return; }
+  box.innerHTML = '';
+  for (const m of list) {
+    const item = el('div', 'msg-item' + (m.fromSelf ? ' self' : ''));
+    item.appendChild(el('div', 'meta', `${m.nickname} · ${m.at || ''}`));
+    item.appendChild(el('div', '', m.text));
+    box.appendChild(item);
+  }
+}
+
+async function refreshLogs() {
+  try {
+    const r = await fetch('/api/logs?source=' + logSource + '&lines=300');
+    const d = await r.json();
+    const box = $('#logBox');
+    if (!d.exists || !d.lines.length) {
+      box.textContent = '（暂无日志）';
+      return;
+    }
+    // 只在内容变化时重绘，避免滚动位置丢失
+    const text = d.lines.join('\n');
+    if (box.dataset.sig === text) return;
+    box.dataset.sig = text;
+
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = '';
+    for (const line of d.lines) {
+      const span = el('div');
+      span.textContent = line;
+      // 机器人日志是 JSON（"level":"error"），守护日志是 [WARN] 这种前缀，两种都要认
+      const isErr = /"level":"error"/.test(line) || /\[ERROR\]/.test(line);
+      const isWarn = /"level":"warn"/.test(line) || /\[WARN\]/.test(line);
+      const isOk = /"level":"info"/.test(line) && /已连接|登录身份确认/.test(line)
+                || /\[OK\]/.test(line) && /已拉起/.test(line);
+      if (isErr) span.className = 'err';
+      else if (isWarn) span.className = 'warn';
+      else if (isOk) span.className = 'ok';
+      box.appendChild(span);
+    }
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  } catch { /* 面板短暂失联时忽略 */ }
+}
+
+async function doAction(action) {
+  const labels = {
+    'bot-start': '启动机器人',
+    'bot-stop': '停止机器人',
+    'bot-restart': '重启机器人',
+    'napcat-start': '启动 NapCat',
+  };
+  if (action === 'bot-stop' && !confirm('停止机器人？停止后群里将不再回复。')) return;
+
+  toast(`${labels[action]}…`, 'ok');
+  try {
+    if (action === 'bot-restart') {
+      await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bot-stop' }),
+      });
+      await new Promise(r => setTimeout(r, 1500));
+      const r = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bot-start' }),
+      });
+      const d = await r.json();
+      toast(d.ok ? '机器人已重启' : ('重启失败：' + d.message), d.ok ? 'ok' : 'err');
+    } else {
+      const r = await fetch('/api/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const d = await r.json();
+      toast(d.message || (d.ok ? '完成' : '失败'), d.ok ? 'ok' : 'err');
+    }
+  } catch (e) {
+    toast('操作失败：' + e.message, 'err');
+  }
+  // 给进程一点反应时间再刷新
+  setTimeout(refreshStatus, 1200);
+  setTimeout(refreshStatus, 3500);
+}
+
+function startDash() {
+  refreshStatus();
+  refreshLogs();
+  loadVoices();
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = setInterval(() => {
+    if (currentTab === 'dash') { refreshStatus(); refreshLogs(); }
+  }, 3000);
+}
+
+/* ---------------- 音色 ---------------- */
+
+let voiceTimer = null;
+
+async function loadVoices() {
+  const box = $('#voiceList');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/voices');
+    const j = await r.json();
+    if (!j.online) {
+      box.textContent = 'TTS 服务未启动（5050）';
+      return;
+    }
+    if (!j.voices || j.voices.length === 0) {
+      box.textContent = '没有可用音色，把模型放进 E:\\tts-venv\\models\\';
+      return;
+    }
+    box.innerHTML = '';
+    for (const v of j.voices) {
+      const div = document.createElement('div');
+      div.className = 'voice-item' + (v.id === j.current ? ' active' : '');
+      div.innerHTML =
+        `<div><div class="vname">${v.name || v.id}</div>` +
+        `<div class="vmeta">${v.id} · ${v.language || '?'} · ${v.file || ''}</div></div>` +
+        (v.id === j.current ? '<span class="vbadge">使用中</span>' : '');
+      div.onclick = () => switchVoice(v.id);
+      box.appendChild(div);
+    }
+  } catch (e) {
+    box.textContent = '读取音色失败：' + e.message;
+  }
+}
+
+async function switchVoice(id) {
+  const box = $('#voiceList');
+  const prev = box.innerHTML;
+  box.innerHTML = '切换中…（首次加载模型约 20 秒）';
+  try {
+    const r = await fetch('/api/voices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice: id }),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      box.innerHTML = prev;
+      alert('切换失败：' + (j.message || j.error || '未知错误'));
+      return;
+    }
+    await loadVoices();
+    refreshStatus();
+  } catch (e) {
+    box.innerHTML = prev;
+    alert('切换失败：' + e.message);
+  }
+}
+
+/* ---------------- 人设 ---------------- */
+
+async function loadPersona() {
+  const r = await fetch('/api/persona');
+  const data = await r.json();
+  if (!data.ok) { toast('人设读取失败：' + data.error, 'err'); return; }
+  personaData = data.data;
+  renderPersona();
+}
+
+function renderPersona() {
+  const list = $('#personaList');
+  list.innerHTML = '';
+  $('#defaultPersonaId').value = personaData.defaultPersonaId || '';
+
+  const bindings = personaData.groupBindings || {};
+  $('#bindings').value = Object.entries(bindings)
+    .map(([k, v]) => `${k}: ${v}`).join('\n');
+
+  personaData.personas.forEach((p, idx) => {
+    const card = el('div', 'persona-card');
+
+    const head = el('div', 'head');
+    const nameInput = el('input');
+    nameInput.type = 'text';
+    nameInput.value = p.name;
+    nameInput.placeholder = '显示名';
+    nameInput.oninput = () => { p.name = nameInput.value; };
+
+    const idInput = el('input');
+    idInput.type = 'text';
+    idInput.value = p.id;
+    idInput.placeholder = 'id（英文，唯一）';
+    idInput.style.maxWidth = '160px';
+    idInput.oninput = () => { p.id = idInput.value; };
+
+    const del = el('button', '', '删除');
+    del.style.marginLeft = 'auto';
+    del.onclick = () => {
+      if (personaData.personas.length <= 1) { toast('至少保留一个人设', 'err'); return; }
+      if (!confirm(`删除「${p.name}」？`)) return;
+      personaData.personas.splice(idx, 1);
+      renderPersona();
+    };
+
+    head.appendChild(nameInput);
+    head.appendChild(idInput);
+    head.appendChild(del);
+    card.appendChild(head);
+
+    const grid = el('div', 'grid2');
+    const mk = (labelText, key, ph) => {
+      const w = el('div');
+      w.appendChild(el('label', '', labelText));
+      const i = el('input');
+      i.type = 'number';
+      i.placeholder = ph;
+      i.value = p[key] ?? '';
+      i.oninput = () => {
+        const v = i.value.trim();
+        if (v === '') delete p[key];
+        else p[key] = Number(v);
+      };
+      w.appendChild(i);
+      return w;
+    };
+    grid.appendChild(mk('闲聊字数上限', 'replyMaxChars', '120'));
+    grid.appendChild(mk('技术话题字数上限', 'replyTechMaxChars', '300'));
+    card.appendChild(grid);
+
+    card.appendChild(el('label', '', 'System Prompt（角色设定）'));
+    const ta = el('textarea');
+    ta.value = p.systemPrompt || '';
+    ta.oninput = () => { p.systemPrompt = ta.value; };
+    card.appendChild(ta);
+
+    list.appendChild(card);
+  });
+}
+
+function collectBindings() {
+  const text = $('#bindings').value.trim();
+  const out = {};
+  if (!text) return out;
+  for (const line of text.split(/\n+/)) {
+    const m = /^([^:：]+)[:：]\s*(\S+)/.exec(line.trim());
+    if (m) out[m[1].trim()] = m[2].trim();
+  }
+  return out;
+}
+
+/* ---------------- 保存 ---------------- */
+
+async function save() {
+  const btn = $('#saveBtn');
+  btn.disabled = true;
+  try {
+    if (currentTab === 'config') {
+      const r = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        const msg = (data.errors || []).map(e => `${e.key}: ${e.message}`).join('；')
+          || data.error || '保存失败';
+        toast(msg, 'err');
+        return;
+      }
+      toast(`已保存 ${data.saved} 项配置`);
+      await loadConfig();
+    } else {
+      personaData.defaultPersonaId = $('#defaultPersonaId').value.trim() || 'whale';
+      personaData.groupBindings = collectBindings();
+      const r = await fetch('/api/persona', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: personaData }),
+      });
+      const data = await r.json();
+      if (!r.ok) { toast(data.error || '保存失败', 'err'); return; }
+      toast('人设已保存（2 秒内生效）');
+    }
+  } catch (e) {
+    toast('保存出错：' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ---------------- 初始化 ---------------- */
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.onclick = () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentTab = tab.dataset.tab;
+    $('#tab-dash').classList.toggle('hidden', currentTab !== 'dash');
+    $('#tab-config').classList.toggle('hidden', currentTab !== 'config');
+    $('#tab-persona').classList.toggle('hidden', currentTab !== 'persona');
+    $('#tab-draw').classList.toggle('hidden', currentTab !== 'draw');
+    // 只在可编辑标签页显示「保存」
+    $('#saveBtn').classList.toggle('hidden', currentTab !== 'config' && currentTab !== 'persona');
+    // 控制台的提示语与别处不同
+    if (currentTab === 'dash') {
+      $('#restartHint').classList.add('hidden');
+      refreshStatus();
+      refreshLogs();
+    } else {
+      $('#restartHint').classList.remove('hidden');
+    }
+    if (currentTab === 'persona') loadPersona();
+    if (currentTab === 'draw') {
+      refreshDrawStats();
+      loadGallery(1);
+    }
+  };
+});
+
+// 控制台按钮
+document.querySelectorAll('[data-action]').forEach(btn => {
+  btn.onclick = () => doAction(btn.dataset.action);
+});
+
+// 日志切换
+document.querySelectorAll('[data-log]').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('[data-log]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    logSource = btn.dataset.log;
+    $('#logBox').dataset.sig = '';
+    refreshLogs();
+  };
+});
+
+$('#saveBtn').onclick = save;
+
+$('#addPersona').onclick = () => {
+  personaData.personas.push({
+    id: 'persona' + (personaData.personas.length + 1),
+    name: '新人设',
+    systemPrompt: '你是……（在这里描述性格和说话方式）',
+    replyMaxChars: 120,
+    replyTechMaxChars: 300,
+  });
+  renderPersona();
+};
+
+loadConfig().catch(e => toast('加载失败：' + e.message, 'err'));
+startDash();
+// 初始就同步一次标签页可见性：默认停在「控制台」，
+// 此时「保存」按钮和「需重启」提示都不该出现
+(function initTabs() {
+  $('#tab-dash').classList.remove('hidden');
+  $('#tab-config').classList.add('hidden');
+  $('#tab-persona').classList.add('hidden');
+  $('#saveBtn').classList.add('hidden');
+  $('#restartHint').classList.add('hidden');
+})();
+
+/* ---------------- 画图 ---------------- */
+
+/** HTML 转义：把用户输入拼进 innerHTML 前必须转义，防 XSS。 */
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+let drawing = false;
+
+async function refreshDrawStats() {
+  try {
+    const r = await fetch('/api/image/stats');
+    const j = await r.json();
+    if (!j.ok) return;
+    const hint = j.enabled
+      ? `${j.count} 张已生成 · 占用 ${j.totalMB} MB`
+      : '生图未启用（去「参数配置 → 本地生图」开启）';
+    $('#drawStatus').textContent = hint;
+  } catch {
+    $('#drawStatus').textContent = '';
+  }
+}
+
+$('#drawBtn').onclick = async () => {
+  if (drawing) return;
+  // 原始提示词优先：填了就直接用，不经过翻译和任何增强
+  const raw = $('#drawRawPrompt').value.trim();
+  const prompt = raw || $('#drawPrompt').value.trim();
+  if (prompt.length === 0) {
+    toast('先写点什么吧', 'err');
+    return;
+  }
+  const rawMode = raw.length > 0;
+
+  drawing = true;
+  const btn = $('#drawBtn');
+  btn.disabled = true;
+  const t0 = Date.now();
+  const tick = setInterval(() => {
+    $('#drawStatus').textContent = `生成中… ${((Date.now() - t0) / 1000).toFixed(0)} 秒`;
+  }, 500);
+
+  try {
+    const res = await fetch('/api/image/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt,
+        // 原始模式：告诉后端跳过翻译和增强
+        rawPrompt: rawMode,
+        // 自动模式的负向词是"追加"，原始模式是"替换"，后端按 rawPrompt 区分
+        negative: rawMode
+          ? ($('#drawRawNegative').value.trim() || undefined)
+          : ($('#drawNegative').value.trim() || undefined),
+        model: $('#drawModel').value === 'auto' ? undefined : $('#drawModel').value,
+        size: Number($('#drawSize').value),
+        style: $('#drawStyle').value,
+        allowAdult: $('#drawAdult').checked,
+        upscaleModel: $('#drawUpscale').value || undefined,
+        upscaleTo: $('#drawUpscale').value && $('#drawUpscaleTo').value
+          ? Number($('#drawUpscaleTo').value)
+          : undefined,
+      }),
+    });
+    const j = await res.json();
+    if (!j.ok) {
+      // 翻译被拒时把 hint 一起显示，告诉用户可以用英文 tag 绕过
+      const msg = j.hint ? `${j.error}\n\n${j.hint}` : (j.error || '生成失败');
+      $('#drawStatus').textContent = '失败';
+      $('#drawResult').innerHTML =
+        `<div style="color:#e06c75;white-space:pre-wrap;line-height:1.6">${esc(msg)}</div>`;
+      return;
+    }
+
+    const sec = (j.elapsedMs / 1000).toFixed(1);
+    $('#drawStatus').textContent = `完成 · ${sec} 秒`;
+    const modelName = j.checkpoint.includes('NoobAI') ? 'SDXL' : 'SD1.5';
+    // 放大过就显示「基准尺寸 → 输出尺寸」
+    const sizeLine = j.upscaled
+      ? `${j.baseSize} → ${j.width}×${j.height}（放大）`
+      : `${j.width}×${j.height}`;
+    const modeTag = j.rawMode ? ' · <span style="color:#e5c07b">原始模式</span>' : '';
+    $('#drawResult').innerHTML = `
+      <div style="margin-bottom:8px">
+        <a href="${j.url}" target="_blank">
+          <img src="${j.url}" alt="${esc(prompt)}" style="max-width:100%;border-radius:8px;border:1px solid #333">
+        </a>
+      </div>
+      <div>${sizeLine} · ${modelName}${modeTag} · ${sec} 秒</div>
+      <div style="margin-top:6px;color:#888;font-size:12px;word-break:break-all">
+        实际提示词：${esc(j.usedPrompt)}
+      </div>`;
+    refreshDrawStats();
+  } catch (e) {
+    toast('请求失败：' + e.message, 'err');
+  } finally {
+    clearInterval(tick);
+    drawing = false;
+    btn.disabled = false;
+  }
+};
+
+$('#freeVramBtn').onclick = async () => {
+  try {
+    const r = await fetch('/api/image/free', { method: 'POST' });
+    const j = await r.json();
+    toast(j.message || (j.ok ? '已释放' : '失败'), j.ok ? 'ok' : 'err');
+  } catch (e) {
+    toast('请求失败：' + e.message, 'err');
+  }
+};
+
+/* ---------------- 历史图片画廊 ---------------- */
+
+let galleryPage = 1;
+let galleryPages = 1;
+
+async function loadGallery(page = 1) {
+  const grid = $('#galleryGrid');
+  const size = Number($('#gallerySize').value) || 60;
+  grid.innerHTML = '<span class="small">加载中…</span>';
+
+  try {
+    const r = await fetch(`/api/image/gallery?page=${page}&size=${size}`);
+    const j = await r.json();
+    if (!j.ok) {
+      grid.innerHTML = `<span class="small">加载失败</span>`;
+      return;
+    }
+
+    galleryPage = j.page;
+    galleryPages = Math.max(1, j.pages || 1);
+
+    if (j.total === 0) {
+      grid.innerHTML = '<span class="small">还没有生成过图片</span>';
+      $('#galleryInfo').textContent = '';
+      $('#galleryPage').textContent = '—';
+      return;
+    }
+
+    $('#galleryInfo').textContent = `共 ${j.total} 张 · ${j.outputDir}`;
+    $('#galleryPage').textContent = `第 ${j.page} / ${galleryPages} 页`;
+
+    grid.innerHTML = '';
+    for (const it of j.items) {
+      const cell = document.createElement('div');
+      cell.style.cssText = 'position:relative;border:1px solid #2a2d33;border-radius:8px;overflow:hidden;background:#16181d';
+
+      const a = document.createElement('a');
+      a.href = it.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+
+      const img = document.createElement('img');
+      img.src = it.url;
+      img.loading = 'lazy';
+      img.alt = it.name;
+      img.style.cssText = 'width:100%;aspect-ratio:1;object-fit:cover;display:block';
+      a.appendChild(img);
+      cell.appendChild(a);
+
+      const cap = document.createElement('div');
+      cap.style.cssText = 'padding:6px 8px;font-size:11px;color:#888;line-height:1.4;word-break:break-all';
+      const t = it.at ? fmtTime(it.at) : '';
+      cap.textContent = `${it.name} · ${it.sizeKB} KB`;
+      if (t) cap.title = `${it.name}\n${t}\n${it.sizeKB} KB`;
+      cell.appendChild(cap);
+
+      grid.appendChild(cell);
+    }
+  } catch (e) {
+    grid.innerHTML = `<span class="small">请求失败：${esc(e.message)}</span>`;
+  }
+}
+
+$('#galleryRefresh').onclick = () => loadGallery(1);
+$('#gallerySize').onchange = () => loadGallery(1);
+$('#galleryPrev').onclick = () => {
+  if (galleryPage > 1) loadGallery(galleryPage - 1);
+};
+$('#galleryNext').onclick = () => {
+  if (galleryPage < galleryPages) loadGallery(galleryPage + 1);
+};
+</script>
+</body>
+</html>
