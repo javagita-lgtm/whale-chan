@@ -11,9 +11,9 @@
  *   - 完整版生成后自动写入曲库，以后秒回
  */
 
-import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawn, execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import type { Logger } from './logger.js';
 import type { ChatAdapter, MessageScene } from './types.js';
 import type { MusicClient } from './music.js';
@@ -203,13 +203,10 @@ export class SingJobQueue {
    */
   private shrinkIfBig(file: string, job: SingJob): string {
     try {
-      const { statSync } = require('node:fs') as typeof import('node:fs');
-      const { join: joinPath, dirname } = require('node:path') as typeof import('node:path');
       const mb = statSync(file).size / 1024 / 1024;
       if (mb <= 6) return file;
 
-      const small = joinPath(dirname(file), `${job.id}-small.mp3`);
-      const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+      const small = join(dirname(file), `${job.id}-small.mp3`);
       execFileSync(
         'ffmpeg',
         ['-y', '-hide_banner', '-loglevel', 'error',
@@ -312,7 +309,6 @@ export class SingJobQueue {
   /** 读音频时长（用 ffprobe）。 */
   private probeDuration(file: string): number {
     try {
-      const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
       const out = execFileSync('ffprobe', [
         '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file,
       ]).toString().trim();

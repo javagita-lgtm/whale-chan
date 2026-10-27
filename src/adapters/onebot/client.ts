@@ -13,6 +13,7 @@
  */
 
 import { WebSocket } from 'ws';
+import { statSync } from 'node:fs';
 import type { Logger } from '../../core/logger.js';
 import type { OneBotEvent, OneBotResponse } from './protocol.js';
 
@@ -286,7 +287,6 @@ export class OneBotClient {
         if (typeof file !== 'string' || file.length === 0) continue;
         // 只统计本地存在的文件（URL / base64 跳过）
         try {
-          const { statSync } = require('node:fs') as typeof import('node:fs');
           bytes += statSync(file).size;
         } catch {
           /* 不是本地文件 */
