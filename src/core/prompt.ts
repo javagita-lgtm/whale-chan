@@ -40,6 +40,25 @@ function formatClock(tsSeconds: number): string {
   return `${hh}:${mm}`;
 }
 
+/**
+ * 完整日期时间，用于告诉模型「今天是几号」。
+ *
+ * 【2026-10-28 真实故障】用户发了一张标着「2026年10月27日」的截图，
+ * 机器人说「这日期是未来的，现在就被截图传出来了，时光机有点先进啊」——
+ * 实际上那天就是 10月28日，截图是昨天的，完全正常。
+ *
+ * 根因：prompt 里只有 `（现在是 10:32）`，没有日期。
+ * 模型不知道今天是几号，只能靠训练数据的截止时间猜，于是把正常日期当成未来。
+ */
+function formatDate(tsSeconds: number): string {
+  const d = new Date(tsSeconds * 1000);
+  const y = d.getFullYear();
+  const mo = d.getMonth() + 1;
+  const day = d.getDate();
+  const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+  return `${y}年${mo}月${day}日 星期${week}`;
+}
+
 /** 渲染历史为「昵称: 内容」的多行文本。 */
 export function renderHistory(history: StoredMessage[], botName: string): string[] {
   return history.map((m) => {
@@ -77,6 +96,17 @@ export function buildMessages(options: PromptBuildOptions): ChatMessage[] {
   const rules = [
     `你叫「${persona.name}」，是这个群里的普通成员，不是客服也不是助手。`,
     sceneDesc,
+    // 日期锚点：不写这条，模型会拿训练截止时间当"现在"，
+    // 把正常的近期日期当成"未来"，进而质疑整条消息是假的。
+    `今天是 ${formatDate(event.timestamp)}，现在 ${formatClock(event.timestamp)}。` +
+      `你的训练数据有截止时间，近期的新闻、人事变动、赛况、股价你天然不知道，` +
+      `所以涉及具体事实时必须依赖下面的联网搜索结果，不能靠自己"记得"。`,
+    // 能力声明：persona 里写了"不要假装联网搜索"，
+    // 模型于是老实说"我没法去联网翻新闻"。要明确告诉它这轮到底有没有搜。
+    '如果下面的上下文里出现了【联网搜索结果】或【图片核查结果】，说明这一轮已经真的查过了，' +
+      '直接引用里面的信息回答，不要说"我没法联网""我查不到"。' +
+      '如果确实没有出现这些块，而对方问的又是近期事实，就坦白说"我这边没搜到相关内容"，' +
+      '不要用"这八成是假的"来代替"我没查到"。',
     // 身份边界：不写清这条，模型会把自己发的东西当成别人发的。
     // 真群实测：机器人发了张图，用户问「你从哪找的图」，
     // 它回「这图明明是你自己甩过来的」「贼喊捉贼」——逻辑彻底崩坏。
