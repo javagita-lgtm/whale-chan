@@ -187,7 +187,8 @@ export class MessagePipeline {
 
     // 链接阅读 / 联网搜索：拿到内容就注入提示词，拿不到就算了（不阻断回复）
     // 传 history 是为了消解搜索词里的代词（"他爹" → "杨少华"）
-    const webResult = await enrichWithWeb(this.ctx, event, logger, history);
+    // 传 imageDataUrls 是因为「发图质疑真假」时要先读图再搜（模型知识有时效）
+    const webResult = await enrichWithWeb(this.ctx, event, logger, history, imageDataUrls);
 
     const messages = buildMessages({
       persona,

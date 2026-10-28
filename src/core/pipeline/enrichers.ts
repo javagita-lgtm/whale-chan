@@ -25,6 +25,7 @@ import {
 import { renderFramesNote, renderTranscript, type Frame, type TranscribeResult } from '../media.js';
 import { fetchXhsNote, isXhsNoteUrl, renderXhsNote } from '../xiaohongshu.js';
 import type { PipelineContext } from './context.js';
+import { extractImageFacts, looksLikeFactCheck, renderImageFacts } from './fact-check.js';
 
 /** 富化结果：文本块 + 需要一并送给多模态模型的图片。 */
 export interface EnrichResult {
@@ -62,6 +63,7 @@ export async function enrichWithWeb(
   event: MessageEvent,
   logger: Logger,
   history: Array<{ nickname: string; text: string }> = [],
+  imageDataUrls: string[] = [],
 ): Promise<EnrichResult> {
   const { config, web, bili, media } = ctx;
   if (!web || !web.enabled) return emptyEnrich();
@@ -127,7 +129,32 @@ export async function enrichWithWeb(
     }
   }
 
-  // 2) 联网搜索（只在有明确搜索意图时触发，避免每句话都花一次请求）
+  // 2) 图片事实核查：发了图 + 质疑真假 → 先读图抽事实，再拿这些事实去搜
+  //
+  // 【2026-10-28 真实故障】用户发「国防部长带100亿现金飞德黑兰」的截图问真假，
+  // 机器人完全没看图，只聊文字，然后说"正规媒体没报道，八成是编的"。
+  // 结论碰巧对，但没有任何依据：图里的信源署名、日期、排版破绽全没分析。
+  //
+  // 更根本的问题：模型权重训练截止时间较早，很多事它本来就不"知道"，
+  // 所以不能靠"我没搜到"来推断真假，必须真的看图 + 真的搜。
+  if (config.web.searchEnabled && imageDataUrls.length > 0 && looksLikeFactCheck(text)) {
+    const facts = await extractImageFacts(ctx, imageDataUrls, text, logger);
+    if (facts) {
+      const hits = await web.search(facts.searchTerms, config.web.searchCount);
+      logger.info('图片核查搜索完成', {
+        query: facts.searchTerms.slice(0, 50),
+        hits: hits.length,
+      });
+      return {
+        ...emptyEnrich(),
+        pageBlocks: [renderImageFacts(facts)],
+        searchBlock: hits.length > 0 ? renderSearchHits(hits, facts.searchTerms) : '',
+      };
+    }
+    logger.info('图片核查失败，退回普通搜索');
+  }
+
+  // 3) 联网搜索（只在有明确搜索意图时触发，避免每句话都花一次请求）
   if (config.web.searchEnabled && looksLikeSearchIntent(text)) {
     // 用 LLM 提炼搜索词，而不是直接把整句话丢给搜索引擎。
     //
@@ -339,11 +366,17 @@ export async function readXhsNote(
  *   用户说「他爹还在吗」，直接搜会返回「给爸爸上香」这类无关结果。
  *   而搜「杨少华」时 10 条全是他的去世报道。
  *
+ * 【2026-10-28 真实故障】
+ *   用户引用了一条长消息问「胡塞打沙特是不是真的」，
+ *   搜索词变成了「[引用 鲸鱼娘：等下，这图右下角写着2026年10月27日…」，
+ *   搜出来全是无关内容，机器人因此说"正规媒体没报道，八成是编的"。
+ *   根因：引用内容（最多 300 字）被当成搜索词的一部分。
+ *
  * 设计：
+ *   - **先剥掉引用块**，引用内容只作为「理解上下文」的素材，不进搜索词
  *   - 带最近 5 条上下文，让模型知道"他爹"指谁
  *   - 只输出关键词，不给解释
  *   - LLM 不可用或失败时退回原句（保证总能搜）
- *   - 1.7 秒左右的额外开销，比搜错方向划算得多
  */
 export async function buildSearchQuery(
   ctx: PipelineContext,
@@ -352,11 +385,37 @@ export async function buildSearchQuery(
   logger: Logger,
 ): Promise<string> {
   const { llm } = ctx;
-  // 先清掉 @ 标记和机器人昵称前缀，这是所有路径都要做的
-  const cleaned = text
+
+  // 1) 剥掉引用块，单独存起来当上下文用
+  //    格式：[引用 昵称：内容]  或  [引用：内容]
+  //    内容里可能出现 ] ，所以用非贪婪 + 贪婪兜底两种策略
+  const quotedBlocks: string[] = [];
+  let cleaned = text.replace(/\[引用[^\]]*\]/g, (m) => {
+    quotedBlocks.push(m.slice(1, -1));
+    return ' ';
+  });
+  // 兜底：引用内容里含 ] 时上面的正则只吃掉一部分，再扫一次残余
+  if (/\[引用/.test(cleaned)) {
+    cleaned = cleaned.replace(/\[引用[\s\S]*$/, (m) => {
+      quotedBlocks.push(m.slice(1));
+      return ' ';
+    });
+  }
+
+  cleaned = cleaned
     .replace(/\[艾特你\]/g, '')
+    .replace(/\[回复\]/g, '')
+    .replace(/\[分享\][^\s]*/g, '')
     .replace(/@\d+/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
+
+  // 用户自己说的话为空（例如只引用不说话）→ 用引用内容兜底搜
+  if (cleaned.length === 0) {
+    const q = quotedBlocks.join(' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    logger.info('提问为空，改用引用内容搜索', { query: q.slice(0, 40) });
+    return q;
+  }
 
   if (!llm.enabled) return cleaned.slice(0, 120);
 
@@ -367,10 +426,16 @@ export async function buildSearchQuery(
     return cleaned.slice(0, 120);
   }
 
-  const ctxText = history
+  // 上下文：引用内容 + 最近几条聊天
+  const ctxParts: string[] = [];
+  if (quotedBlocks.length > 0) {
+    ctxParts.push(`【被引用的消息】${quotedBlocks.join(' ').slice(0, 300)}`);
+  }
+  const recent = history
     .slice(-5)
     .map((h) => `${h.nickname}：${h.text.slice(0, 80)}`)
     .join('\n');
+  if (recent.length > 0) ctxParts.push(`【最近聊天】\n${recent}`);
 
   try {
     const res = await llm.complete([
@@ -379,11 +444,12 @@ export async function buildSearchQuery(
         content:
           '你是搜索关键词提炼器。把用户的问题改写成 1~3 个搜索关键词。' +
           '必须消解代词：根据上文把「他爹/这个/那个/他/她」换成具体的人名或事物名。' +
-          '只输出关键词本身，用空格分隔，不要解释、不要引号、不要标点。',
+          '只输出关键词本身，用空格分隔，不要解释、不要引号、不要标点。' +
+          '注意：被引用的消息只是背景，不要把它当成搜索目标。',
       },
       {
         role: 'user',
-        content: `【上文】\n${ctxText || '（无）'}\n【用户问题】${cleaned}\n【关键词】`,
+        content: `${ctxParts.join('\n\n') || '（无上文）'}\n\n【用户问题】${cleaned}\n【关键词】`,
       },
     ]);
 
