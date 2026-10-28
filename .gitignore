@@ -53,6 +53,8 @@ desktop.ini
 
 # ---------- 一次性脚本与临时文件 ----------
 scripts/_*
+scripts/verify-fact-check.ts
+scripts/verify-*.ts
 _*.mjs
 _*.ts
 _*.json
@@ -61,6 +63,11 @@ _*.log
 *.tmp
 *.bak
 *.orig
+
+# 测试用的临时截图（真实聊天截图、伪造新闻图等都不该入库）
+test-*.png
+test-*.jpg
+test-*.jpeg
 
 # ---------- 本地运行时 ----------
 .whale-chan/

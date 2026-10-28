@@ -37,8 +37,17 @@ const EXTS = new Set(['.ts', '.js', '.mjs', '.ps1', '.json', '.md', '.html', '.b
 /** 跳过这些目录。 */
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'data', 'logs', 'voicemodel', 'coverage']);
 
-/** 跳过本脚本自身：它必须保留真实值才能做替换。 */
-const SELF = join(ROOT, 'scripts', 'sanitize.mjs');
+/**
+ * 跳过脚本自身：它们的规则表里必须写着真实值才能做替换和检测。
+ *
+ * 【踩过的坑】最初只跳过了 sanitize.mjs 自己，结果 audit.mjs 里的检测正则
+ * 被一起替换成了占位符（`/\b1000000001\b/`），审计从此变成误报机器。
+ * 两个脚本必须互相排除。
+ */
+const SKIP_SELF = new Set([
+  join(ROOT, 'scripts', 'sanitize.mjs'),
+  join(ROOT, 'scripts', 'audit.mjs'),
+]);
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -46,7 +55,7 @@ function walk(dir, out = []) {
     const p = join(dir, name);
     const st = statSync(p);
     if (st.isDirectory()) walk(p, out);
-    else if (EXTS.has(extname(name)) && p !== SELF) out.push(p);
+    else if (EXTS.has(extname(name)) && !SKIP_SELF.has(p)) out.push(p);
   }
   return out;
 }

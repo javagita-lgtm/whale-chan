@@ -22,12 +22,18 @@ const SKIP_FILES = new Set([
   join(ROOT, 'scripts', 'sanitize.mjs'),
 ]);
 
-/** 敏感模式。任一命中都视为不合格。 */
+/**
+ * 敏感模式。任一命中都视为不合格。
+ *
+ * 这里可以直接写真实值——因为 sanitize.mjs 已经显式跳过 audit.mjs，
+ * 不会再把它替换掉。（早期没跳过时出过事故：审计正则被替换成占位符，
+ * 从此把正常文件全部误报。）
+ */
 const SECRET_PATTERNS = [
   { name: 'DeepSeek/OpenAI 密钥', re: /sk-[A-Za-z0-9]{20,}/ },
   { name: 'GitHub Token', re: /ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}/ },
   { name: 'AWS Access Key', re: /AKIA[0-9A-Z]{16}/ },
-  { name: '真实密码字面量', re: /deepSeek1234|password\s*[:=]\s*['"][^'"]{8,}/ },
+  { name: '明文密码赋值', re: /(?:password|passwd|pwd)\s*[:=]\s*['"][^'"]{6,}['"]/i },
   { name: '真实 QQ 号', re: /\b1702996540\b|\b724585113\b|\b1107244005\b|\b2052827499\b/ },
   { name: '本机用户名路径', re: /C:[\\/]Users[\\/]Administrator/ },
   { name: '真实昵称', re: /爱造饭的/ },
