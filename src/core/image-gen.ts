@@ -18,6 +18,7 @@ import type { LlmClient } from './llm.js';
 import type { ComfyClient, GenerateResult } from './comfy.js';
 import type { GeminiPainter } from './gemini.js';
 import { translateToPrompt } from './prompt-translate.js';
+import { constraintsForRefs } from './ref-constraints.js';
 
 /**
  * 模型预设。
@@ -94,6 +95,49 @@ export interface ImageRequest {
   text: string;
   /** 是否私聊（私聊放宽内容限制） */
   isPrivate: boolean;
+
+  /**
+   * 参考图路径（可选，最多 3 张）。**目前是预留接口，尚未接通。**
+   *
+   * ## 现状（2026-11-04）
+   *
+   * 字段和下游逻辑都写好了，但**没有任何调用方传入**：
+   * - `pipeline/sticker-image.ts` 只传了 `text` / `isPrivate`
+   * - `tools.ts` 的 `generate_image` 定义了 `reference` 参数，
+   *   但 `dispatchIntent` 没往这里传
+   *
+   * 也就是说，用户发姿势图说「按这个画」时，图**不会**被用到。
+   * 这是刻意的——接通需要改动 pipeline 的图收集与传递链路，
+   * 而当前硬件（RTX 2070 8GB）跑多图参考意义有限。
+   *
+   * ## 接通时要做的
+   *
+   * 1. `sticker-image.ts` 从 `event` 里取图路径，传进来
+   * 2. `tools.ts` 的 `reference` 参数经 `dispatchIntent` 透传
+   * 3. 确认后端支持多图（Gemini 支持，ComfyUI 需配 IPAdapter）
+   *
+   * ## 约束词会自动生效
+   *
+   * 一旦传了 `refImages`，`constraintsForRefs()` 会按 `refKinds`
+   * 追加对应约束（不要把线稿辅助线/服装人台画进成图等），
+   * 逻辑见 `ref-constraints.ts`，已有单元测试覆盖。
+   *
+   * 顺序约定（和 Gemini 多图输入对应）：角色 → 服装（无人物的图） → 姿势线稿
+   */
+  refImages?: string[];
+
+  /**
+   * 参考图类型标记，用于自动选约束词。
+   *
+   * 只有传了 `refImages` 才有意义。不传时默认 `{ hasPose: true }`
+   * （因为姿势线稿是最常见的参考类型）。
+   */
+  refKinds?: {
+    hasPose?: boolean;
+    hasCostume?: boolean;
+    hasFace?: boolean;
+    keepOutfit?: boolean;
+  };
 }
 
 /** 生图结果。 */
@@ -364,10 +408,25 @@ export class ImageGenerator {
     if (!gemini) return null;
 
     const desc = req.text.replace(GEN_PATTERN, '').replace(/^[，,：:\s]+/, '').trim();
-    const prompt = desc.length > 0 ? desc : req.text;
+    let prompt = desc.length > 0 ? desc : req.text;
+
+    // 有参考图时追加约束词。
+    //
+    // 为什么要这层：多图参考最常见的失败不是画不出，而是「画多了」——
+    // 把姿势线稿的关节圆、服装图里的人台一起画进去。
+    // 单靠负面词表压不住，必须在正向提示词里明说。
+    // 约束内容提炼自 gen-ai-pose-image 的实战经验。
+    if (req.refImages && req.refImages.length > 0) {
+      const extra = constraintsForRefs(req.refKinds ?? { hasPose: true });
+      prompt = `${prompt}\n\n${extra}`;
+      logger.info('参考图生图，已追加约束词', {
+        refs: req.refImages.length,
+        kinds: JSON.stringify(req.refKinds ?? {}),
+      });
+    }
 
     logger.info('走 Gemini 生图', { prompt: prompt.slice(0, 60) });
-    const result = await gemini.paint(prompt);
+    const result = await gemini.paint(prompt, req.refImages?.[0]);
     if (!result) return null;
 
     return {

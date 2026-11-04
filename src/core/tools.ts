@@ -88,10 +88,10 @@ export const GENERATE_IMAGE_TOOL: ToolDef = {
         type: 'string',
         description: '画面描述（中文即可，保留用户说的主体、风格、构图、光线等细节）',
       },
-      reference: {
-        type: 'string',
-        description: '参考图路径（可选，仅当用户明确要求基于某张图改时填）',
-      },
+      // 预留：参考图生图（姿势/服装/脸部）。
+      // 暂不开放给模型——pipeline 还没接通参考图传递链路，
+      // 现在给模型这个参数，它会填一个实际用不上的路径，反而误导。
+      // 接通后在这里加 reference 字段即可（见 image-gen.ts 的 refImages 注释）。
     },
     required: ['prompt'],
   },
