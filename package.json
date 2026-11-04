@@ -1,8 +1,22 @@
 {
   "name": "whale-chan",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Whale-chan — 混迹于 QQ / 微信群的 AI 聊天机器人（自研核心）",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/javagita-lgtm/whale-chan.git"
+  },
+  "keywords": [
+    "qq-bot",
+    "onebot",
+    "chatbot",
+    "llm",
+    "deepseek",
+    "tts",
+    "image-generation"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.5.0"

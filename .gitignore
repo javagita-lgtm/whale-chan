@@ -80,3 +80,6 @@ runtime/
 # ---------- 凭据（Gemini cookie 含真实 PSID，绝不可提交）----------
 scripts/gemini-cookies.json
 scripts/gemini-cookies-*.json
+
+# 脱敏/审计用的真实值配置（含真实账号，本地专用）
+scripts/.sanitize-rules.json

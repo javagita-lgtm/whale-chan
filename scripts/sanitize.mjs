@@ -7,29 +7,49 @@
  * 用法：node scripts/sanitize.mjs [--check]
  *   --check  只报告，不改文件
  */
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 
 const ROOT = process.cwd();
 const CHECK_ONLY = process.argv.includes('--check');
 
+/**
+ * 真实值从 `scripts/.sanitize-rules.json` 读（该文件已被 gitignore）。
+ *
+ * 为什么不写在代码里：本仓库是公开的，把真 QQ 号写进 `RULES` 等于
+ * 直接暴露在 GitHub 上——脱敏脚本自己成了泄露源。
+ *
+ * 本地准备（一次性）：
+ *   echo '{"1702996540":"1000000001","724585113":"100000001"}' \
+ *     > scripts/.sanitize-rules.json
+ */
+const RULES_FILE = join(ROOT, 'scripts', '.sanitize-rules.json');
+
+/** 读规则；没有文件时返回空（脚本仍可运行，只是没东西可替换）。 */
+function loadRealValues() {
+  if (!existsSync(RULES_FILE)) {
+    return {};
+  }
+  try {
+    return JSON.parse(readFileSync(RULES_FILE, 'utf8'));
+  } catch (e) {
+    console.error(`读取 ${RULES_FILE} 失败：${e.message}`);
+    return {};
+  }
+}
+
+const realValues = loadRealValues();
+
 /** 真实值 → 占位符。按长度降序替换，避免前缀冲突。 */
 const RULES = [
-  // 机器人自己的 QQ 号
-  { from: '1702996540', to: '1000000001' },
-  // 测试群号
-  { from: '724585113', to: '100000001' },
-  // 另一个群号
-  { from: '1107244005', to: '100000002' },
-  // 用户自己的 QQ
-  { from: '2052827499', to: '1000000002' },
-  // 昵称
-  { from: '机器人账号', to: '机器人账号' },
-  { from: '鲸鱼娘', to: '鲸鱼娘' },
+  // 账号/群号：来自本地配置，不写死在代码里
+  ...Object.entries(realValues).map(([from, to]) => ({ from, to })),
   // 本机用户名（只替换出现在路径里的，避免误伤 "Administrator" 权限描述）
-  { from: 'C:\\Users\\Administrator\\', to: 'C:\\Users\\<用户名>\\' },
-  { from: 'C:/Users/<用户名>/', to: 'C:/Users/<用户名>/' },
-];
+  // 用户名本身也从配置读，键名写 FULL_USER_PATH
+  ...(realValues.__USER_PATH__
+    ? [{ from: realValues.__USER_PATH__, to: 'C:\\Users\\<用户名>\\' }]
+    : []),
+].sort((a, b) => b.from.length - a.from.length);
 
 /** 要处理的文件类型。 */
 const EXTS = new Set(['.ts', '.js', '.mjs', '.ps1', '.json', '.md', '.html', '.bat', '.yaml', '.yml']);
@@ -47,6 +67,9 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'data', 'logs', 'voic
 const SKIP_SELF = new Set([
   join(ROOT, 'scripts', 'sanitize.mjs'),
   join(ROOT, 'scripts', 'audit.mjs'),
+  // 本地真实值配置：它本来就装着真实值，替换它没意义，
+  // 而且它已被 gitignore，不会入库。
+  join(ROOT, 'scripts', '.sanitize-rules.json'),
 ]);
 
 function walk(dir, out = []) {
