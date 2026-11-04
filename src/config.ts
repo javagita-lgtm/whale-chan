@@ -170,6 +170,25 @@ export interface ImageGenConfig {
   blockNsfw: boolean;
   /** 闲置多少分钟自动卸载模型（0 = 不卸载） */
   idleUnloadMinutes: number;
+
+  /** 优先用哪个后端：gemini（云端，显存 ~0）| comfy（本地，可控性强） */
+  prefer: 'gemini' | 'comfy';
+
+  /**
+   * Gemini 生图（走本地适配层，云端算力，显存 ~0）。
+   *
+   * 为什么优先它：本地 8GB 显卡跑 SDXL 要占 4~5GB，和 TTS/SVC 抢显存。
+   * Gemini 用云端算力，本机只做 HTTP，显存占用 ~0；
+   * 而且它出的图**没有可见水印**（Google 用 SynthID 隐形水印），
+   * 完全不需要去水印环节。实测 1408x768、22~31 秒/张。
+   */
+  gemini: {
+    enabled: boolean;
+    /** 适配层地址（scripts/gemini_server.py 起的服务） */
+    baseUrl: string;
+    /** 单张超时 */
+    timeoutMs: number;
+  };
 }
 
 /** 唱歌（SVC 翻唱 + 曲库）。 */
@@ -335,6 +354,14 @@ export function loadConfig(cwd = process.cwd()): AppConfig {
       timeoutMs: envInt('IMAGE_TIMEOUT_MS', 120_000),
       blockNsfw: envBool('IMAGE_BLOCK_NSFW', true),
       idleUnloadMinutes: envInt('IMAGE_IDLE_UNLOAD_MIN', 10),
+      prefer: (envStr('IMAGE_BACKEND', 'gemini') === 'comfy' ? 'comfy' : 'gemini') as
+        | 'gemini'
+        | 'comfy',
+      gemini: {
+        enabled: envBool('GEMINI_PAINT_ENABLED', false),
+        baseUrl: envStr('GEMINI_PAINT_URL', 'http://127.0.0.1:5052'),
+        timeoutMs: envInt('GEMINI_PAINT_TIMEOUT_MS', 240_000),
+      },
     },
     tts: {
       enabled: envBool('TTS_ENABLED', false),

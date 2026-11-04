@@ -16,6 +16,7 @@
 import type { Logger } from './logger.js';
 import type { LlmClient } from './llm.js';
 import type { ComfyClient, GenerateResult } from './comfy.js';
+import type { GeminiPainter } from './gemini.js';
 import { translateToPrompt } from './prompt-translate.js';
 
 /**
@@ -115,9 +116,15 @@ export interface ImageReply {
  *
  * 量词要覆盖全：一张/一幅/一个/一只/一条/一头/一朵…
  * 实测「画一只蓝色的鲸鱼」曾因为只认「张幅个」而漏掉。
+ *
+ * 【2026-11-02 修复】`画` + 量词后面必须跟内容：
+ *   之前 `画画真有意思` 会被 「画」+「一?」 匹配到（把「画」自身当量词），
+ *   现在要求量词后面至少还有一个非标点字符。
+ *   注意这条只是**正则兜底**——语义路由（router.ts 的 tool 层）优先，
+ *   它能把「画画真有意思」正确判为聊天。
  */
 const GEN_PATTERN =
-  /(画|生成|来)(一?[张幅个只条头朵棵座栋间件套]|一下|个)/;
+  /(?:画|生成|来)\s*(?:一?[张幅个只条头朵棵座栋间件套])\s*[^\s，。！？,.!?]|(?:画|生成)\s*(?:一下)\s*[^\s，。！？,.!?]/;
 const GEN_PATTERN_BARE = /(画|绘制|生成|create|draw)/i;
 
 /** 排除「画风」「画家」「动画」这类误伤。 */
@@ -184,6 +191,11 @@ export function wantsImage(text: string): boolean {
   // 3) 没有量词时，允许「画XX」这种口语说法（如「画个猫」已被 GEN_PATTERN 覆盖，
   //    这里兜底「绘制」「draw」这类动词），但要排除「动画」「漫画」等名词
   if (FALSE_POSITIVE_STRICT.test(t)) return false;
+
+  // 「画画真有意思」「画家」「画质」这类：动词后面紧跟「画/风/家/质」的不是生图请求。
+  // 实测「画画真有意思」曾被这条兜底误判成生图（「画」+「画」刚好满足 \s*\S）。
+  if (/^(?:我)?(?:画|绘制|生成)(?:画|风|家|质)/.test(t)) return false;
+
   return GEN_PATTERN_BARE.test(t) && /(画|绘制|生成|draw)\s*\S/.test(t);
 }
 
@@ -252,6 +264,16 @@ export interface ImageGeneratorOptions {
   blockNsfw: boolean;
   /** 生成超时 */
   timeoutMs: number;
+  /**
+   * Gemini 生图（可选）。
+   *
+   * 为什么优先它：云端算力，显存 ~0，且无可见水印（不需要去水印环节）。
+   * 本地 ComfyUI 跑 SDXL 要占 4~5GB，会和 TTS/SVC 抢显卡。
+   * 实测 1408x768、22~31 秒/张。
+   */
+  gemini?: GeminiPainter | null;
+  /** 优先用哪个：'gemini' | 'comfy' */
+  prefer?: 'gemini' | 'comfy';
 }
 
 export class ImageGenerator {
@@ -295,9 +317,75 @@ export class ImageGenerator {
     return task;
   }
 
+  /**
+   * 决定用哪条路出图。
+   *
+   * 优先级：gemini > comfy
+   *   - gemini: 显存 ~0 + 无可见水印（最优）
+   *   - comfy : 显存 5GB，但可控性最好（seed/LoRA/画风）
+   *
+   * 失败会自动往下一级回退。
+   */
+  private backends(): Array<'gemini' | 'comfy'> {
+    const { gemini, prefer } = this.options;
+    const all: Array<'gemini' | 'comfy'> = [];
+    if (gemini && prefer !== 'comfy') all.push('gemini');
+    all.push('comfy');
+    return all;
+  }
+
   private async doGenerate(req: ImageRequest, startedAt: number): Promise<ImageReply> {
-    const { logger, llm, comfy, timeoutMs } = this.options;
     this.busy = true;
+    try {
+      for (const backend of this.backends()) {
+        if (backend === 'gemini' && this.options.gemini) {
+          const r = await this.tryGemini(req, startedAt);
+          if (r) return r;
+          this.options.logger.info('Gemini 出图失败，尝试下一个后端');
+        }
+        if (backend === 'comfy') {
+          return await this.doGenerateComfy(req, startedAt);
+        }
+      }
+      // 理论上不可达（backends 最后一定是 comfy）
+      return await this.doGenerateComfy(req, startedAt);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * 走 Gemini 出图。
+   *
+   * 不做提示词翻译——Gemini 中文理解很好，而且对"图上写字"很准。
+   */
+  private async tryGemini(req: ImageRequest, startedAt: number): Promise<ImageReply | null> {
+    const { gemini, logger } = this.options;
+    if (!gemini) return null;
+
+    const desc = req.text.replace(GEN_PATTERN, '').replace(/^[，,：:\s]+/, '').trim();
+    const prompt = desc.length > 0 ? desc : req.text;
+
+    logger.info('走 Gemini 生图', { prompt: prompt.slice(0, 60) });
+    const result = await gemini.paint(prompt);
+    if (!result) return null;
+
+    return {
+      ok: true,
+      filePath: result.filePath,
+      usedPrompt: prompt,
+      elapsedMs: Date.now() - startedAt,
+    };
+  }
+
+  /**
+   * 走豆包出图。
+   *
+   * 不做提示词翻译——豆包是中文模型，直接吃中文描述，
+   * 而且它对"图上写什么字"的理解比 SD 系好得多。
+   */
+  private async doGenerateComfy(req: ImageRequest, startedAt: number): Promise<ImageReply> {
+    const { logger, llm, comfy, timeoutMs } = this.options;
 
     try {
       // 1) 翻译成英文 tag（含画风增强）
@@ -374,9 +462,8 @@ export class ImageGenerator {
         message: '画图的时候出错了',
         elapsedMs: Date.now() - startedAt,
       };
-    } finally {
-      this.busy = false;
     }
+    // busy 由外层 doGenerate 统一管理（它包住豆包和 Comfy 两条路）
   }
 
   /** 中文 → 英文 tag。失败时返回 null，调用方决定怎么降级。 */

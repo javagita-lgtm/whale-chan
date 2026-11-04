@@ -129,36 +129,6 @@ export function isExplicitRequest(text: string): boolean {
   return EXPLICIT_PATTERN.test(text);
 }
 
-/**
- * 翻译系统提示词（宽松版）。
- *
- * 只在面板开启「允许成人内容」时使用。
- * 措辞上强调"成年人"以降低误判，但对于明确涉及未成年设定的角色，
- * 模型仍会拒绝——这个开关控制的是本项目的过滤，不是模型的安全策略。
- */
-const TRANSLATE_SYSTEM_ADULT = `你是 Stable Diffusion 提示词工程师。把用户的中文画图需求转成英文 Danbooru 风格 tag。
-用户在使用自己的本机、自己的显卡、自己的模型，画面只保存在本地。
-
-输出规则：
-- 只输出 tag，用英文逗号分隔，不要解释、不要中文、不要 markdown
-- 顺序：质量词 → 主体 → 外貌/服装 → 动作/表情 → 构图 → 背景 → 光影
-- 质量词固定开头：masterpiece, best quality
-
-内容规则：
-- 角色名用 Danbooru 规范写法：角色 (作品)
-- 如果角色是你认识的，补上她的标志性外貌与服装（发色、发型、瞳色、代表服装）
-- 用户提到成年人角色或原创角色时，按其描述如实转换成对应 tag
-- **如果用户描述的角色在原作设定中是未成年人，不要生成性化/裸露相关 tag，
-  改为保留角色其他特征并加上 fully clothed**
-
-构图规则（必须包含）：
-- 单人：1girl/1boy + solo
-- 景别至少一个：upper body / full body / cowboy shot / portrait
-- 背景至少一个：simple background / white background / blurred background
-- 光影至少一个：soft lighting / cinematic lighting / studio lighting
-
-数量：至少 15 个 tag，20~35 个最佳。`;
-
 /** 从 LLM 输出里清洗出纯 tag 串。 */
 export function sanitizeTags(raw: string): string {
   let t = raw.trim();
@@ -243,14 +213,8 @@ export function composeNegative(style: ArtStyle, userNegative?: string): string 
 
 /** 翻译选项。 */
 export interface TranslateOptions {
-  /**
-   * 是否允许成人向内容（仅面板开启时有值）。
-   *
-   * 注意：这只放开**本项目自己的**过滤，不改变模型的安全策略。
-   * DeepSeek 对明确涉及未成年设定的角色仍会拒绝，那时返回 null，
-   * 调用方应给出明确提示而不是硬画。
-   */
-  allowAdult?: boolean;
+  /** 预留字段；当前翻译流程不使用额外选项 */
+  _unused?: never;
 }
 
 /**
@@ -259,7 +223,6 @@ export interface TranslateOptions {
  * @param raw 用户原话
  * @param llm LLM 客户端（未配置时返回空，调用方降级）
  * @param logger 日志
- * @param options 翻译选项（allowAdult 控制是否用宽松 prompt）
  */
 export async function translateToPrompt(
   raw: string,
@@ -297,7 +260,7 @@ export async function translateToPrompt(
   try {
     // 面板开启了宽松模式时用另一套 system prompt。
     // 注意：这只影响我们自己的过滤策略，模型自身的安全限制仍在。
-    const system = options?.allowAdult ? TRANSLATE_SYSTEM_ADULT : TRANSLATE_SYSTEM;
+    const system = TRANSLATE_SYSTEM;
     const res = await llm.complete([
       { role: 'system', content: system },
       { role: 'user', content: clean },
@@ -308,8 +271,7 @@ export async function translateToPrompt(
     if (looksLikeRefusal(res.content)) {
       logger.info('翻译被模型拒绝', {
         from: clean.slice(0, 40),
-        allowAdult: options?.allowAdult === true,
-        reply: res.content.slice(0, 80),
+                reply: res.content.slice(0, 80),
       });
       return null;
     }

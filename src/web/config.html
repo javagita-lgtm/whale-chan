@@ -401,20 +401,6 @@
         </select>
       </div>
 
-      <div class="field">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="drawAdult" style="width:auto;margin:0">
-          <span>允许成人内容（仅本机面板）</span>
-        </label>
-        <p class="small" style="margin-top:6px;line-height:1.6">
-          勾选后不再拦截露骨描述，只影响这个面板——群里和 DSH 保持原有限制。<br>
-          <b>注意</b>：中文需求仍需经过 LLM 翻译，模型自身的安全策略拦不住。
-          涉及未成年设定角色的色情内容会被拒绝，且属于违法行为。<br>
-          <b>绕过办法</b>：直接把英文 tag 写进输入框（如 <code>1girl, tohsaka rin, white thighhighs</code>），
-          英文不经过 LLM，只受本机策略约束。
-        </p>
-      </div>
-
       <div class="actions">
         <button id="drawBtn" class="primary">生成</button>
         <button id="freeVramBtn">释放显存</button>
@@ -1143,7 +1129,6 @@ $('#drawBtn').onclick = async () => {
         model: $('#drawModel').value === 'auto' ? undefined : $('#drawModel').value,
         size: Number($('#drawSize').value),
         style: $('#drawStyle').value,
-        allowAdult: $('#drawAdult').checked,
         upscaleModel: $('#drawUpscale').value || undefined,
         upscaleTo: $('#drawUpscale').value && $('#drawUpscaleTo').value
           ? Number($('#drawUpscaleTo').value)

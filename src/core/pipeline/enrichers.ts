@@ -26,6 +26,7 @@ import { renderFramesNote, renderTranscript, type Frame, type TranscribeResult }
 import { fetchXhsNote, isXhsNoteUrl, renderXhsNote } from '../xiaohongshu.js';
 import type { PipelineContext } from './context.js';
 import { extractImageFacts, looksLikeFactCheck, renderImageFacts } from './fact-check.js';
+import { crossCheckAndRender } from './cross-checker.js';
 
 /** 富化结果：文本块 + 需要一并送给多模态模型的图片。 */
 export interface EnrichResult {
@@ -140,15 +141,19 @@ export async function enrichWithWeb(
   if (config.web.searchEnabled && imageDataUrls.length > 0 && looksLikeFactCheck(text)) {
     const facts = await extractImageFacts(ctx, imageDataUrls, text, logger);
     if (facts) {
-      const hits = await web.search(facts.searchTerms, config.web.searchCount);
+      // 用交叉验证而不是单次搜索：真假判断最怕只看到一边的说法
+      const block = await crossCheckAndRender(
+        { web, logger, perQuery: config.web.searchCount, maxQueries: 3 },
+        facts.searchTerms,
+      );
       logger.info('图片核查搜索完成', {
         query: facts.searchTerms.slice(0, 50),
-        hits: hits.length,
+        blockChars: block.length,
       });
       return {
         ...emptyEnrich(),
         pageBlocks: [renderImageFacts(facts)],
-        searchBlock: hits.length > 0 ? renderSearchHits(hits, facts.searchTerms) : '',
+        searchBlock: block,
       };
     }
     logger.info('图片核查失败，退回普通搜索');
@@ -165,9 +170,14 @@ export async function enrichWithWeb(
     const query = await buildSearchQuery(ctx, text, history, logger);
     if (query.length >= 2) {
       logger.info('检测到搜索意图', { query: query.slice(0, 40) });
-      const hits = await web.search(query, config.web.searchCount);
-      if (hits.length > 0) {
-        return { ...emptyEnrich(), searchBlock: renderSearchHits(hits, query) };
+      // 交叉验证：多角度搜 + 去重 + 证据强度评估，
+      // 让模型知道"这批证据可不可靠"，而不是拿到 5 条就当作事实。
+      const block = await crossCheckAndRender(
+        { web, logger, perQuery: config.web.searchCount, maxQueries: 3 },
+        query,
+      );
+      if (block.length > 0) {
+        return { ...emptyEnrich(), searchBlock: block };
       }
     }
   }

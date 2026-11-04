@@ -76,3 +76,7 @@ runtime/
 
 # ---------- pnpm ----------
 .pnpm-store/
+
+# ---------- 凭据（Gemini cookie 含真实 PSID，绝不可提交）----------
+scripts/gemini-cookies.json
+scripts/gemini-cookies-*.json

@@ -34,6 +34,8 @@ import { KeyedQueue, sleep, splitMessage } from './pipeline/text.js';
 import { enrichWithWeb } from './pipeline/enrichers.js';
 import { collectImages } from './pipeline/images.js';
 import { speakReply, trySing, trySpeak } from './pipeline/speech.js';
+import { routeWithRegexOnly, intentFromToolCall, isUnmistakableMusicRequest, type Intent } from './router.js';
+import { ALL_TOOLS } from './tools.js';
 import {
   maybeSendSticker,
   pickStickerCandidates,
@@ -121,15 +123,14 @@ export class MessagePipeline {
       text: event.text.slice(0, 60),
     });
 
-    // 唱歌排最前：它和「语音」都含「说/唱」，必须先判断
-    if (await trySing(this.ctx, event, logger)) return;
-
-    // 生图优先：命中触发词就直接出图，不走普通回复
-    // （生图本身要花十几秒，再拼一段闲聊会让用户等更久）
-    if (await tryGenerateImage(this.ctx, event, logger)) return;
-
-    // 语音次之：说「念一下xxx」就合成语音发出去
-    if (await trySpeak(this.ctx, event, logger)) return;
+    // 意图判断完全交给 replyTo 里的 LLM 工具调用。
+    //
+    // 【2026-11-02 修复】这里原来有一层 `tryRegexFallback`，
+    // 它在调模型**之前**跑正则，导致：
+    //   - 「这个视频详细说了什么？」被正则误判 → 抢在模型前面去唱歌
+    //   - 模型本来判断正确（chat），但根本没机会执行
+    // 现在正则兜底挪进 replyTo，只在「模型没请求工具」时才跑，
+    // 而且是最后手段。
 
     await this.replyTo(event, decision.reason, currentRowId);
   }
@@ -148,6 +149,28 @@ export class MessagePipeline {
       .catch((error: unknown) => {
         logger.warn('插话判断失败', { message: (error as Error).message });
       });
+  }
+
+  /**
+   * 按意图分发到对应的能力处理器。
+   *
+   * @returns true = 已处理（本轮不再走文字回复）；false = 没接住（功能没开等），
+   *          调用方应该继续走正常文字回复。
+   */
+  private async dispatchIntent(event: MessageEvent, intent: Intent): Promise<boolean> {
+    const { logger } = this.ctx;
+
+    if (intent.kind === 'play_song') {
+      return trySing(this.ctx, event, logger, intent);
+    }
+    if (intent.kind === 'generate_image') {
+      return tryGenerateImage(this.ctx, event, logger, intent);
+    }
+    if (intent.kind === 'speak') {
+      return trySpeak(this.ctx, event, logger, intent);
+    }
+    // web_search 由 enrichers 处理（它需要 history，在 replyTo 更早的位置）
+    return false;
   }
 
   /**
@@ -213,10 +236,58 @@ export class MessagePipeline {
           ? this.ctx.offlineReply(event)
           : '（离线模式：尚未配置 LLM_API_KEY）';
       } else {
-        const result = await this.ctx.llm.complete(messages);
+        // 一次调用同时完成「判断用户想干什么」和「生成回复」。
+        //
+        // 为什么合并：之前是 3 个正则函数各判断一遍（trySing /
+        // tryGenerateImage / trySpeak），再加 1 次对话 LLM 调用。
+        // 改成 tool 后如果单独发一次路由请求，就变成 2 次 LLM 调用 ——
+        // 延迟翻倍、成本翻倍，而且测试里的 mock 顺序也被打乱。
+        //
+        // 现在 tools 直接挂在对话请求上：模型要么调用工具（就执行动作），
+        // 要么直接回文字（就是普通聊天），**零额外开销**。
+        const result = await this.ctx.llm.complete(messages, {
+          tools: ALL_TOOLS,
+          toolChoice: 'auto',
+        });
+
+        // 模型要执行动作 → 交给对应的处理器，本轮不走文字回复
+        const calls = result.toolCalls ?? [];
+        if (calls.length > 0) {
+          const intent = intentFromToolCall(calls[0]!, logger);
+          if (intent) {
+            logger.info('模型请求执行动作', {
+              kind: intent.kind,
+              args: JSON.stringify(intent).slice(0, 120),
+            });
+            const handled = await this.dispatchIntent(event, intent);
+            if (handled) return;
+            // 处理器没接（如功能没开），继续走文字回复
+          }
+        }
+
+        // 模型没请求工具时的保守兜底。
+        //
+        // 只在**非常明确**的情况下才兜（见 isUnmistakableMusicRequest），
+        // 因为通用正则会误判：「这个视频说了什么」曾被当成放歌。
+        // 宁可漏判（用户再说一遍即可），也不能误判（抢答跑偏很难纠正）。
+        if (calls.length === 0) {
+          const fallback = routeWithRegexOnly(event.text);
+          const onlyIfCertain =
+            fallback.kind === 'play_song' && isUnmistakableMusicRequest(event.text);
+          if (onlyIfCertain) {
+            logger.info('正则兜底触发（模型未调工具）', {
+              kind: fallback.kind,
+              title: fallback.kind === 'play_song' ? fallback.title : undefined,
+            });
+            const handled = await this.dispatchIntent(event, fallback);
+            if (handled) return;
+          }
+        }
+
         const extracted = extractStickerHint(result.content);
         stickerHint = extracted.hint;
-        // 字数上限随任务类型浮动：闲聊短、技术放宽、内容交代次之、详细模式最宽
+        // 字数上限随任务类型浮动：闲聊短、技术放宽、内容交代次之、
+        // 详细模式最宽、翻译最宽（翻译必须完整，截断等于没翻完）
         const { limit, kind } = resolveReplyLimitWithRecap(
           persona.replyMaxChars,
           persona.replyTechMaxChars,
@@ -224,8 +295,17 @@ export class MessagePipeline {
           [event.text, ...history.slice(-3).map((h) => h.text)],
           persona.replyDetailMaxChars,
         );
-        if (kind !== 'chat') logger.debug('放宽字数上限', { kind, limit });
+        if (kind !== 'chat') logger.info('放宽字数上限', { kind, limit });
+        const before = extracted.text.length;
         replyText = sanitizeReply(extracted.text, limit);
+        // 翻译场景被截断时必须留痕，否则用户只看到"翻了一半"却查不到原因
+        if (kind === 'translate' && replyText.length < before) {
+          logger.warn('翻译内容被截断', {
+            limit,
+            total: before,
+            kept: replyText.length,
+          });
+        }
       }
     } catch (error) {
       stats.failed++;

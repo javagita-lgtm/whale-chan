@@ -7,6 +7,7 @@
 
 import type { MessageEvent } from '../types.js';
 import type { Logger } from '../logger.js';
+import type { Intent } from '../router.js';
 import { buildImageCaption, wantsImage } from '../image-gen.js';
 import type { PipelineContext } from './context.js';
 import { sleep } from './text.js';
@@ -19,20 +20,29 @@ export async function tryGenerateImage(
   ctx: PipelineContext,
   event: MessageEvent,
   logger: Logger,
+  intent?: Intent,
 ): Promise<boolean> {
   const { config, imageGen, adapter, stats, store, botName } = ctx;
   // 用可选链：旧配置/测试桩里可能没有 imageGen 字段，
   // 直接访问 .enabled 会抛错并中断整条回复链路。
   if (!config.imageGen?.enabled || !imageGen) return false;
-  if (!wantsImage(event.text)) return false;
+
+  // 语义路由优先；没传 intent 的老调用方仍走正则
+  const byIntent = intent?.kind === 'generate_image';
+  if (!byIntent && !wantsImage(event.text)) return false;
+
+  // 模型给的 prompt 已经去掉「帮我画」这类指令词，更适合直接出图
+  const prompt = intent?.kind === 'generate_image' ? intent.prompt : event.text;
 
   logger.info('触发生图', {
     scene: event.scene,
     text: event.text.slice(0, 60),
+    prompt: prompt.slice(0, 60),
+    via: intent?.via ?? 'regex',
   });
 
   const reply = await imageGen.handle({
-    text: event.text,
+    text: prompt,
     isPrivate: event.scene === 'private',
   });
 

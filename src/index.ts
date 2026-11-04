@@ -21,6 +21,7 @@ import { TtsClient } from './core/tts.js';
 import { MusicClient } from './core/music.js';
 import { Singer, loadSongLibrary } from './core/singer.js';
 import { SingJobQueue } from './core/sing-queue.js';
+import { GeminiPainter } from './core/gemini.js';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { OneBotClient } from './adapters/onebot/client.js';
@@ -106,6 +107,16 @@ async function main(): Promise<void> {
     defaultCheckpoint: config.imageGen.checkpoint,
     logger: createLogger('comfy'),
   });
+  // Gemini 生图（可选）：走本地适配层，云端算力，显存 ~0，且无可见水印
+  const gemini = config.imageGen.gemini.enabled
+    ? new GeminiPainter({
+        logger: createLogger('gemini'),
+        baseUrl: config.imageGen.gemini.baseUrl,
+        timeoutMs: config.imageGen.gemini.timeoutMs,
+        enabled: true,
+      })
+    : null;
+
   const imageGen = new ImageGenerator({
     logger: createLogger('image'),
     llm,
@@ -113,7 +124,29 @@ async function main(): Promise<void> {
     enabled: config.imageGen.enabled,
     blockNsfw: config.imageGen.blockNsfw,
     timeoutMs: config.imageGen.timeoutMs,
+    gemini,
+    prefer: config.imageGen.prefer,
   });
+
+  if (gemini) {
+    void gemini
+      .ping()
+      .then((online) => {
+        if (online) {
+          logger.info('Gemini 生图已就绪（云端算力，显存 ~0，无可见水印）', {
+            适配层: config.imageGen.gemini.baseUrl,
+          });
+        } else {
+          logger.warn('Gemini 生图不可用：适配层没起来或没有 cookie', {
+            适配层: config.imageGen.gemini.baseUrl,
+            提示: '先跑 scripts/gemini_server.py',
+          });
+        }
+      })
+      .catch(() => {
+        logger.warn('Gemini 生图探活失败');
+      });
+  }
 
   // 本地语音合成（Style-Bert-VITS2 + RikkaBotan 中文萌系音色）
   const tts = new TtsClient({

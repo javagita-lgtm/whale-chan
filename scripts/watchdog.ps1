@@ -19,6 +19,23 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# ---------- 静默模式 ----------
+# 计划任务用 wscript.exe → powershell -WindowStyle Hidden 启动，
+# 这种情况下不需要往屏幕写字（早期版本每 10 分钟弹一次窗口，很扰人）。
+# 判断依据：没有真实控制台（$Host.UI 不是 ConsoleHost 的交互会话）就静默。
+$script:Silent = $true
+try {
+    # 手动在终端里跑时，ConsoleHost 且窗口可见 → 允许输出
+    if ($Host.Name -eq 'ConsoleHost') {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine -notmatch '-WindowStyle\s+Hidden') {
+            $script:Silent = $false
+        }
+    }
+} catch {
+    $script:Silent = $true
+}
+
 # ---------- 路径常量 ----------
 # 全部可通过环境变量覆盖，便于换机器/换用户时不用改脚本。
 # 不设环境变量时按脚本自身位置推导，保证「解压即用」。
@@ -71,7 +88,12 @@ function Write-Log {
     )
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $line  = "[$stamp][$Level] $Message"
-    Write-Host $line
+    # 只在交互式控制台才输出到屏幕。
+    # 计划任务/静默启动时不写屏幕——Write-Host 在某些宿主下会短暂弹窗，
+    # 实测用户被每 10 分钟一次的窗口打扰。
+    if ($Host.Name -eq 'ConsoleHost' -and -not $script:Silent) {
+        Write-Host $line
+    }
     $file = Join-Path $LogDir ("watchdog-{0}.log" -f (Get-Date -Format 'yyyyMMdd'))
     Add-Content -Path $file -Value $line -Encoding UTF8
 }
@@ -83,7 +105,8 @@ function Enter-SingleInstance {
     $created = $false
     $script:Mutex = New-Object System.Threading.Mutex($true, 'Global\WhaleChanWatchdog', [ref]$created)
     if (-not $created) {
-        Write-Host '已有 watchdog 在运行，本实例退出。'
+        # 已有实例在跑，静默退出。不写屏幕也不写日志——
+        # Guard 每 10 分钟会调一次，每次都记一行会把日志刷满。
         exit 0
     }
 }
@@ -297,8 +320,50 @@ function Start-Tts {
     Write-Log 'TTS 启动命令已发出' 'OK'
 }
 
-function Start-ComfyUI {
-    $script = Join-Path $Root 'scripts\start-comfyui.ps1'
+function Get-GeminiEnabled {
+    try {
+        $envFile = Join-Path $Root '.env'
+        if (-not (Test-Path $envFile)) { return $false }
+        foreach ($line in (Get-Content $envFile -Encoding UTF8)) {
+            if ($line -match '^\s*GEMINI_PAINT_ENABLED\s*=\s*true\s*$') { return $true }
+        }
+    } catch { }
+    return $false
+}
+
+function Test-GeminiPort {
+    # 只看端口不够，还要确认 cookie 就绪
+    # （端口开着但没 cookie 时，/paint 全 500，面板却显示"在线"）
+    if (-not (Test-PortOpen -Port 5052 -TimeoutMs 500)) { return $false }
+    try {
+        $r = Invoke-RestMethod 'http://127.0.0.1:5052/health' -TimeoutSec 5
+        return ($r.ok -eq $true -and $r.hasCookie -eq $true)
+    } catch {
+        return $false
+    }
+}
+
+function Start-Gemini {
+    $script = Join-Path $Root 'scripts\start-gemini.ps1'
+    if (-not (Test-Path $script)) {
+        Write-Log "缺少 Gemini 启动脚本: $script" 'WARN'
+        return
+    }
+
+    # 代理没起来的话，先记一条警告（不阻断启动，但日志要能查到）
+    $proxyOk = Test-PortOpen -Port 10808 -TimeoutMs 500
+    if (-not $proxyOk) {
+        Write-Log '代理 10808 未监听，Gemini 出图会失败（先检查代理）' 'WARN'
+    }
+
+    Write-Log '启动 Gemini 生图适配层（5052）'
+    Start-Process -FilePath 'powershell.exe' `
+        -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script) `
+        -WindowStyle Hidden | Out-Null
+    Write-Log 'Gemini 启动命令已发出' 'OK'
+}
+
+function Start-ComfyUI {    $script = Join-Path $Root 'scripts\start-comfyui.ps1'
     if (-not (Test-Path $script)) {
         Write-Log "缺少 ComfyUI 启动脚本: $script" 'WARN'
         return
@@ -375,6 +440,9 @@ function Invoke-Supervise {
     # TTS 启动要加载模型（17 秒），冷却给 120 秒
     $lastTtsStart = (Get-Date).AddMinutes(-10)
     $ttsEnabled = Get-TtsEnabled
+    # Gemini 适配层（Flask）启动快，冷却 60 秒足够
+    $lastGeminiStart = (Get-Date).AddMinutes(-10)
+    $geminiEnabled = Get-GeminiEnabled
     # Set-StrictMode 下读未定义变量会抛异常，必须先声明。
     # 用于"未连上"告警去重：只在状态翻转时记一行。
     $script:disconnectWarned = $false
@@ -518,6 +586,19 @@ function Invoke-Supervise {
                     $lastTtsStart = Get-Date
                     # 后端加载要 30~50 秒，等久一点再进下一轮
                     Start-Sleep -Seconds 45
+                }
+            }
+
+            # ---- Gemini 生图适配层 ----
+            # Flask 启动很快（2~4 秒），冷却给 60 秒就够。
+            # Test-GeminiPort 会额外验证 cookie 就绪——
+            # 只看端口会漏掉"端口开着但没 cookie、/paint 全 500"的情况。
+            if ($geminiEnabled -and -not (Test-GeminiPort)) {
+                $sinceGemini = ((Get-Date) - $lastGeminiStart).TotalSeconds
+                if ($sinceGemini -gt 60) {
+                    Start-Gemini
+                    $lastGeminiStart = Get-Date
+                    Start-Sleep -Seconds 10
                 }
             }
 

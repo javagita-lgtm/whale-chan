@@ -37,6 +37,20 @@ export interface SingRequest {
   text: string;
   /** 想听的音色（空 = 用曲库默认） */
   voice?: string;
+  /**
+   * 显式指定处理模式（可选）。
+   *
+   * 【为什么需要】语义路由（function calling）已经判断出 mode 了，
+   * 但如果只把歌名拼回 text 传进来，`handle()` 内部会**重新跑
+   * detectSingMode()**，把 `original` 丢掉。
+   *
+   * 实测 bug：用户说「我想听《This game》…原唱」，
+   * 路由给出 mode=original（正确），但拼成「唱This game」后，
+   * detectSingMode 看到「唱」就判成 clip —— 于是去翻唱了。
+   *
+   * 传了这个字段就以它为准，不再重新判断。
+   */
+  mode?: 'clip' | 'full' | 'original';
 }
 
 /** 处理模式。 */
@@ -82,9 +96,13 @@ export type SingResult =
  *   1. 直接跟内容（歌名/书名号/引号）——排除「唱原唱」「唱不」
  *   2. 量词（一首/一曲）
  *   3. 修饰词（歌/一下/完整/全部/整首…）
+ *
+ * 【2026-11-02 修复】「唱」后面允许空格：
+ *   之前「唱 This game」不匹配（要求紧跟字母），
+ *   但中英混写时用户普遍会加空格。现在 唱\s* 兼容。
  */
 const SING_PATTERN =
-  /唱(?![原不别没])([《「『“"‘']|[a-zA-Z\u3040-\u30ff\u4e00-\u9fff])|唱(一?[首曲个])|唱(歌|一下|完整|全部|整首|全曲|整个)的?|[唱来]一?首|来一首|点歌|(用|拿)\s*\S{2,12}\s*(的)?(音色|声音|声线)?\s*唱/;
+  /唱(?![原不别没])\s*([《「『“"‘'\[a-zA-Z\u3040-\u30ff\u4e00-\u9fff])|唱\s*(一?[首曲个])|唱\s*(歌|一下|完整|全部|整首|全曲|整个)的?|[唱来]一?首|来一首|点歌|(用|拿)\s*\S{2,12}\s*(的)?(音色|声音|声线)?\s*唱/;
 
 /**
  * 否定的说法要排除（「我不想唱歌」「别唱了」）。
@@ -113,15 +131,43 @@ export function wantsSing(text: string): boolean {
  *
  * 用户说「我想听春日影」「放一下春日影」——不要翻唱，直接放原曲。
  * 这类话里通常没有「唱」字，所以要和 SING_PATTERN 分开判断。
+ *
+ * 【2026-11-02 修复】之前漏掉了「放 + 直接接歌名/书名号」这个最常见的形式，
+ * 实测这些都触发不了：
+ *   放《This game》      放一首 This game     放首歌
+ *   放这首歌听听          放《X》作者名这首歌
+ * 用户最自然的说法反而全废了，所以补上。
+ *
+ * 但「放 + 任意字」太宽：实测把「放寒假」「放学」「放假」「放心」
+ * 「放屁」「放大」全误判成放歌了。所以下面用 FAKE_FANG 先排除。
  */
-const LISTEN_PATTERN =
-  /(想听|要听|放一?下|放个|播放|来一段?原|原唱|原版)|听(一?[下遍]|一?首)/;
+const FAKE_FANG =
+  /^放\s*(假|学|晴|松|心|大|屁|开|置|弃|任|宽|手|低|血|电|射|慢|快|任|眼|声|歌的?时候)/;
+
+const LISTEN_PATTERN = new RegExp(
+  [
+    // 原有：想听 / 要听 / 放一下 / 放个 / 播放 / 原唱 / 原版
+    '(想听|要听|放一?下|放个|播放|来一段?原|原唱|原版)',
+    // 听一下 / 听一遍 / 听一首
+    '|听(一?[下遍]|一?首)',
+    // 放 + 书名号/引号：放《X》、放「X」、放"X"
+    '|放\\s*[《「『“"\'\\[]',
+    // 放一首/放个/放只 + 内容
+    '|放\\s*(一?首|个|只)',
+    // 放 + 任意歌名（排除"放这/放那/放什么"等指代词）
+    '|放\\s*(?![这那什怎哪])[^\\s，。！？,.!?]{1,20}',
+    // 「这首歌」指向（配合上文曲名）
+    '|放(这|那)首歌',
+  ].join(''),
+);
 
 /** 是否要「听原唱」。 */
 export function wantsOriginal(text: string): boolean {
   const t = text.replace(/\[艾特你\]/g, '').trim();
   if (t.length < 3) return false;
   if (NEGATIVE_PATTERN.test(t)) return false;
+  // 「放假/放学/放心/放大」这类不是放歌
+  if (FAKE_FANG.test(t)) return false;
   // 明确说了「唱」的一律走翻唱（「唱完整版」也算）
   if (SING_PATTERN.test(t)) return false;
   // 「原唱/原版」是强信号
@@ -247,7 +293,9 @@ export class Singer {
     const { logger, music, enabled } = this.options;
     if (!enabled) return { kind: 'disabled' };
 
-    const mode = detectSingMode(req.text);
+    // 调用方显式给了 mode 就以它为准（语义路由比正则准），
+    // 否则才从原句里猜。见 SingRequest.mode 的注释。
+    const mode = req.mode ?? detectSingMode(req.text);
     const songName = extractSongName(req.text);
 
     // ---- 模式 1：只听原唱 ----

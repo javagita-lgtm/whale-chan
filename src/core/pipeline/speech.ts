@@ -20,6 +20,7 @@ import {
 import { detectSingMode, extractSingVoice, extractSongName, wantsMusic } from '../singer.js';
 import type { PipelineContext } from './context.js';
 import type { LlmClient } from '../llm.js';
+import type { Intent } from '../router.js';
 
 /**
  * 把要朗读的文本翻成目标语言。
@@ -70,21 +71,49 @@ export async function trySing(
   ctx: PipelineContext,
   event: MessageEvent,
   logger: Logger,
+  intent?: Intent,
 ): Promise<boolean> {
   const { config, singer, adapter, stats } = ctx;
   if (!config.sing?.enabled || !singer) return false;
-  if (!wantsMusic(event.text)) return false;
 
+  // 优先用上层传来的语义路由结果（function calling 判定）；
+  // 没传（老调用方）才退回正则，保证兼容。
+  const byIntent = intent?.kind === 'play_song';
+  if (!byIntent && !wantsMusic(event.text)) return false;
+
+  // 歌名：语义路由给的更准（已经去掉了「放」「想听」这类修饰）
+  const title = intent?.kind === 'play_song' ? intent.title : undefined;
   const voice = extractSingVoice(event.text);
-  const mode = detectSingMode(event.text);
+
+  // 模式映射：intent 的 mode 只有 original/sing 两种语义，
+  // 而 SingMode 还有 clip/full 的区分（翻唱片段 vs 整首）。
+  // 「sing」还要再看用户有没有说「完整/整首」。
+  const singMode: 'clip' | 'full' | 'original' =
+    intent?.kind === 'play_song'
+      ? intent.mode === 'original'
+        ? 'original'
+        : /(完整|全部|整首|全曲|整个|从头到尾|full)/.test(event.text)
+          ? 'full'
+          : 'clip'
+      : detectSingMode(event.text);
+
   logger.info('触发唱歌', {
     scene: event.scene,
-    mode,
+    mode: singMode,
+    title: title ?? '(从原句提取)',
     text: event.text.slice(0, 40),
     voice: voice ?? 'default',
+    via: intent?.via ?? 'regex',
   });
 
-  const result = await singer.handle({ text: event.text, voice });
+  // 有准确歌名时替换掉原句里的杂词，避免 Singer 再去猜。
+  //
+  // 【关键】必须把 mode 显式传下去：
+  //   拼成「唱X」会让 singer.handle 内部的 detectSingMode 看到「唱」
+  //   就判成 clip，把路由判好的 original 丢掉 —— 用户明明说「听原唱」
+  //   结果机器人去翻唱了。这个 bug 实际发生过。
+  const singText = title ? `唱${title}` : event.text;
+  const result = await singer.handle({ text: singText, voice, mode: singMode });
 
   switch (result.kind) {
     // ---- 曲库成品 ----
@@ -167,7 +196,7 @@ export async function trySing(
 
       // 原唱模式下文案不同——不能说"我不会唱"，那样很奇怪
       const msg =
-        mode === 'original'
+        singMode === 'original'
           ? result.query.length > 0
             ? `找不到「${result.query}」的原唱欸`
             : '想听哪首？'
@@ -251,12 +280,18 @@ export async function trySpeak(
   ctx: PipelineContext,
   event: MessageEvent,
   logger: Logger,
+  intent?: Intent,
 ): Promise<boolean> {
   const { config, tts, adapter, llm, stats, store, botName } = ctx;
   if (!config.tts?.enabled || !tts) return false;
-  if (!wantsSpeech(event.text)) return false;
 
-  let content = extractSpeechText(event.text);
+  // 语义路由判定「要语音」时不看正则；反之仍需正则兜底
+  const byIntent = intent?.kind === 'speak';
+  if (!byIntent && !wantsSpeech(event.text)) return false;
+
+  // intent 里带了要念的内容时优先用（模型已经提干净了）
+  const fromIntent = intent?.kind === 'speak' ? (intent.text ?? '') : '';
+  let content = fromIntent.length > 0 ? fromIntent : extractSpeechText(event.text);
   if (content.length === 0) return false;
 
   // 语言指令：「用日语说一句求求你了」→ 要的是这句的日语说法，不是念汉字

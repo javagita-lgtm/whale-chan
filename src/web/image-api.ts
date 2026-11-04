@@ -96,15 +96,11 @@ function readImageConfig(root: string): {
  * 面板生图不需要 LLM 翻译：用户直接写提示词。
  * 但如果输入是中文，仍然要转成 tag。
  *
- * @param allowAdult 面板勾了「允许成人内容」时传 true，
- *   只放开本项目自己的过滤——模型自身的安全策略不受影响，
- *   被拒绝时返回 null，由调用方给出明确提示。
  * @param userNegative 用户填的额外负向词（追加到默认词后面，不是替换）
  */
 async function toPrompt(
   text: string,
   styleInput: string,
-  allowAdult: boolean,
   userNegative?: string,
 ): Promise<{ positive: string; negative: string } | null> {
   const isAscii = /^[\x20-\x7E,()\[\]\-_.:]+$/.test(text);
@@ -126,7 +122,7 @@ async function toPrompt(
   const { translateToPrompt } = await import('../core/prompt-translate.js');
   const cfg = loadConfig();
   const llm = new LlmClient(cfg.llm, createLogger('web-llm'));
-  const r = await translateToPrompt(text, llm, logger, { allowAdult });
+  const r = await translateToPrompt(text, llm, logger);
   if (!r) return null;
 
   // translateToPrompt 内部已经拼过默认负向词，这里把用户词追加到后面
@@ -169,8 +165,6 @@ export async function handleImageApi(
       steps?: number;
       cfg?: number;
       negative?: string;
-      /** 面板勾了「允许成人内容」时传 true */
-      allowAdult?: boolean;
       /**
        * 原始模式：prompt 原样送给 ComfyUI。
        * 不翻译、不加画风/构图词、不做内容过滤。
@@ -208,7 +202,6 @@ export async function handleImageApi(
 
     try {
       const rawMode = body.rawPrompt === true;
-      const allowAdult = body.allowAdult === true;
 
       // 原始模式：原样透传，不翻译、不加画风词、不过滤
       const p = rawMode
@@ -223,7 +216,6 @@ export async function handleImageApi(
         : await toPrompt(
             text,
             body.style ?? 'anime',
-            allowAdult,
             // 自动模式下 negative 是「追加」到默认负向词后面
             body.negative,
           );

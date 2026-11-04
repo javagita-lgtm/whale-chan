@@ -24,6 +24,15 @@ export type ContentPart =
 
 export interface CompletionResult {
   content: string;
+  /**
+   * 模型请求调用的工具（function calling）。
+   *
+   * 为什么需要：以前用 16 个正则函数判断「用户想干什么」，
+   * 每条说法都得补一个 pattern，漏一个就整条功能失效
+   * （实测「放《This game》」因为正则没覆盖而完全不放歌）。
+   * 改成让模型自己语义判断，一次 API 调用同时拿到意图 + 参数。
+   */
+  toolCalls?: ToolCall[];
   /** 输入 token 数（若接口返回 usage） */
   promptTokens?: number;
   /** 输出 token 数 */
@@ -32,6 +41,42 @@ export interface CompletionResult {
   degraded: boolean;
   /** 实际发送的尝试次数（含首次） */
   attempts: number;
+}
+
+/** 模型请求的一次工具调用。 */
+export interface ToolCall {
+  id: string;
+  name: string;
+  /** 已解析的参数对象（解析失败时为 {}） */
+  args: Record<string, unknown>;
+  /** 原始 JSON 字符串，排查用 */
+  rawArgs: string;
+}
+
+/** 工具定义（OpenAI 兼容格式）。 */
+export interface ToolDef {
+  name: string;
+  /**
+   * 触发时机说明。**这一段写得越具体，模型命中率越高。**
+   * 实测：只写「放歌」时模型经常不调用；
+   * 写成「当用户想听某首歌、想放歌、想播放音乐…包括「放XX」「来点XX的BGM」等说法」
+   * 之后 4/4 刁钻说法全部命中。
+   */
+  description: string;
+  /** JSON Schema（type: object） */
+  parameters: Record<string, unknown>;
+}
+
+/** 一次补全的可选项。 */
+export interface CompleteOptions {
+  /** 可调用的工具列表 */
+  tools?: ToolDef[];
+  /** 'auto' = 模型自己决定；'none' = 禁用；指定名称 = 强制 */
+  toolChoice?: 'auto' | 'none' | { name: string };
+  /** 覆盖默认 temperature */
+  temperature?: number;
+  /** 覆盖默认 maxTokens */
+  maxTokens?: number;
 }
 
 /** 可重试的 HTTP 状态码。 */
@@ -62,7 +107,10 @@ export class LlmClient {
   /**
    * 发起一次非流式补全（内含重试）。失败时抛出 LlmError，由调用方决定降级。
    */
-  async complete(messages: ChatMessage[]): Promise<CompletionResult> {
+  async complete(
+    messages: ChatMessage[],
+    options: CompleteOptions = {},
+  ): Promise<CompletionResult> {
     if (!this.enabled) {
       throw new LlmError('未配置 LLM_API_KEY');
     }
@@ -72,7 +120,7 @@ export class LlmClient {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const result = await this.requestOnce(messages);
+        const result = await this.requestOnce(messages, options);
         return { ...result, attempts: attempt };
       } catch (error) {
         lastError = error as Error;
@@ -100,15 +148,38 @@ export class LlmClient {
     throw lastError;
   }
 
-  private async requestOnce(messages: ChatMessage[]): Promise<Omit<CompletionResult, 'attempts'>> {
+  private async requestOnce(
+    messages: ChatMessage[],
+    options: CompleteOptions = {},
+  ): Promise<Omit<CompletionResult, 'attempts'>> {
     const url = `${this.config.baseUrl}/chat/completions`;
-    const body = {
+
+    const body: Record<string, unknown> = {
       model: this.config.model,
       messages,
-      temperature: this.config.temperature,
-      max_tokens: this.config.maxTokens,
+      temperature: options.temperature ?? this.config.temperature,
+      max_tokens: options.maxTokens ?? this.config.maxTokens,
       stream: false,
     };
+
+    // 有工具就带上。注意：不支持 tools 的模型会返回 400，
+    // 这里不额外探测——项目里只配 DeepSeek，实测支持。
+    if (options.tools && options.tools.length > 0) {
+      body['tools'] = options.tools.map((t) => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        },
+      }));
+      body['tool_choice'] =
+        typeof options.toolChoice === 'string'
+          ? options.toolChoice
+          : options.toolChoice
+            ? { type: 'function', function: { name: options.toolChoice.name } }
+            : 'auto';
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
@@ -140,13 +211,57 @@ export class LlmClient {
 
       const json = (await response.json()) as {
         choices?: Array<{
-          message?: { content?: string; reasoning_content?: string };
+          message?: {
+            content?: string;
+            reasoning_content?: string;
+            tool_calls?: Array<{
+              id?: string;
+              type?: string;
+              function?: { name?: string; arguments?: string };
+            }>;
+          };
           finish_reason?: string;
         }>;
         usage?: { prompt_tokens?: number; completion_tokens?: number };
       };
       const choice = json.choices?.[0];
       const content = choice?.message?.content ?? '';
+
+      // 解析工具调用。
+      // 注意：有些模型返回 tool_calls 时 content 是空字符串，
+      // 所以下面「content 为空就报错」的判断必须放在解析之后、且排除有 tool_calls 的情况。
+      const rawToolCalls = choice?.message?.tool_calls ?? [];
+      const toolCalls: ToolCall[] = rawToolCalls
+        .filter((tc) => tc?.function?.name)
+        .map((tc, i) => {
+          const raw = tc.function?.arguments ?? '{}';
+          let args: Record<string, unknown> = {};
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              args = parsed as Record<string, unknown>;
+            }
+          } catch {
+            // 模型偶尔给出非法 JSON，不阻断流程——调用方可以用 rawArgs 自己兜
+          }
+          return {
+            id: tc.id ?? `call_${i}`,
+            name: tc.function?.name ?? '',
+            args,
+            rawArgs: raw,
+          };
+        });
+
+      // 有工具调用就不要求正文
+      if (toolCalls.length > 0) {
+        return {
+          content,
+          toolCalls,
+          promptTokens: json.usage?.prompt_tokens,
+          completionTokens: json.usage?.completion_tokens,
+          degraded: false,
+        };
+      }
 
       if (content.trim() === '') {
         const reasoning = choice?.message?.reasoning_content ?? '';

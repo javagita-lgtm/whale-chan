@@ -86,13 +86,35 @@ export function wantsDetail(text: string): boolean {
 }
 
 /**
- * 计算含「内容交代」场景的字数上限。
+ * 是否是翻译请求。
  *
- * 三档 + 详细模式：
- *   chat     120   闲聊
- *   tech     300   技术问题
- *   recap    600   内容交代（说了什么/总结）
- *   detail  1500   明确要求"详细/完整/展开"时
+ * 【2026-10-29 真实故障】用户说「翻译一下这段话」，
+ * 旧逻辑匹配不到 recap / detail，落到 chat 档（120 字），
+ * 翻译长文时被硬截断，只翻了一半。
+ *
+ * 翻译的本质是**信息搬运**，必须完整——截断就等于没翻完。
+ * 所以单独给一档，而且优先级高于 recap（翻译比总结更需要完整）。
+ */
+const TRANSLATE_PATTERN =
+  /(翻译|翻成|译为|译成|翻一下|翻译成|translate|中译英|英译中|日译中|中译日)/i;
+
+export function wantsTranslation(text: string): boolean {
+  return TRANSLATE_PATTERN.test(text);
+}
+
+/**
+ * 计算回复的字数上限。
+ *
+ * 五个档位（按优先级）：
+ *   detail      1500+  明确要求"详细/完整/展开"
+ *   translate   2000   翻译请求（必须完整，不能截断）
+ *   recap        600   内容交代（总结/说了什么）
+ *   tech         300   技术问题
+ *   chat         120   闲聊
+ *
+ * 翻译档为什么排在 recap 前面：
+ *   翻译是信息搬运，截断就等于没翻完。
+ *   而 recap（总结）本身就允许压缩。
  *
  * @param recapChars 内容交代场景的上限（如视频总结）
  * @param detailChars 详细模式的上限；缺省取 recap 的 2.5 倍
@@ -103,13 +125,20 @@ export function resolveReplyLimitWithRecap(
   recapChars: number | undefined,
   texts: string[],
   detailChars?: number,
-): { limit: number; kind: 'detail' | 'recap' | 'tech' | 'chat' } {
+): { limit: number; kind: 'detail' | 'translate' | 'recap' | 'tech' | 'chat' } {
   const base = baseChars ?? 120;
   const tech = techChars ?? Math.max(base, 300);
   const recap = recapChars ?? Math.max(tech, 600);
   const detail = detailChars ?? Math.max(recap * 2.5, 1500);
 
   const joined = texts.join(' ');
+
+  // 翻译优先于一切：它必须完整
+  // （用户说"详细翻译"时也走这里，因为 detail 已经含在 translate 的上限里了）
+  if (wantsTranslation(joined)) {
+    return { limit: Math.max(detail * 1.5, 2000), kind: 'translate' };
+  }
+
   // 详细优先：它比普通 recap 需要更多空间承载分段结构
   if (wantsDetail(joined)) {
     return { limit: Math.max(detail, recap, tech, base), kind: 'detail' };
